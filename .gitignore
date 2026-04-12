@@ -1,0 +1,35 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# data (never commit health data)
+backend/data/raw/*
+backend/data/parquet/*
+!backend/data/raw/.gitkeep
+!backend/data/parquet/.gitkeep
+
+# node
+node_modules/
+.next/
+out/
+
+# health data (NEVER commit)
+data/
+
+# journal logs
+backend/data/journal.jsonl
+
+# claude
+.claude/
+
+# editor
+.vscode/
+.idea/
+
+# iOS
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+*.ipa
