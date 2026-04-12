@@ -2,7 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'smart_watch',
+  title: 'smart_health',
   description: 'Apple Health recovery & strain dashboard',
 };
 

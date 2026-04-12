@@ -52,7 +52,7 @@ export default function Dashboard() {
   if (err) {
     return (
       <main className="max-w-4xl mx-auto p-6">
-        <h1 className="text-2xl mb-4">smart_watch</h1>
+        <h1 className="text-2xl mb-4">smart_health</h1>
         <div className="bg-panel border border-bad rounded p-4 text-bad text-sm">
           <div className="font-medium">Backend unreachable</div>
           <div className="text-gray-400 mt-2">{err}</div>
@@ -64,7 +64,7 @@ export default function Dashboard() {
   if (!data) {
     return (
       <main className="max-w-4xl mx-auto p-6">
-        <h1 className="text-2xl mb-4">smart_watch</h1>
+        <h1 className="text-2xl mb-4">smart_health</h1>
         <div className="text-gray-500 text-sm">Loading…</div>
       </main>
     );
@@ -78,7 +78,7 @@ export default function Dashboard() {
   return (
     <main className="max-w-4xl mx-auto p-6 space-y-6">
       <header className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold">smart_watch</h1>
+        <h1 className="text-2xl font-semibold">smart_health</h1>
         <div className="flex items-center gap-4">
           <a
             href="/journal"

@@ -1,9 +1,9 @@
-# smart_watch
+# smart_health
 
 Whoop/Bevel-style recovery dashboard built on your Apple Watch data.
 
 ```
-smart_watch/
+smart_health/
 ├── backend/          FastAPI + DuckDB (port 8400)
 │   ├── app/
 │   │   ├── parser.py    stream-parse export.xml → parquet

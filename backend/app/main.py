@@ -1,4 +1,4 @@
-"""FastAPI entrypoint for the smart_watch backend.
+"""FastAPI entrypoint for the smart_health backend.
 
 Run:
     cd backend
@@ -40,7 +40,7 @@ RAW_DIR.mkdir(parents=True, exist_ok=True)
 PARQUET_DIR.mkdir(parents=True, exist_ok=True)
 
 
-app = FastAPI(title="smart_watch", version="0.1.0")
+app = FastAPI(title="smart_health", version="0.1.0")
 
 # Next.js dev server runs on 3400 (see README).
 app.add_middleware(
