@@ -106,17 +106,19 @@ def _get_today_strain(parquet_dir: Path) -> dict[str, Any]:
     p = parquet_dir / "workouts.parquet"
     if p.exists():
         rows = _query(parquet_dir, f"""
-            SELECT type, duration_min, active_kcal
+            SELECT type, duration_min, active_kcal, start
             FROM read_parquet('{p.as_posix()}')
             WHERE CAST(start AS DATE) = current_date
-            ORDER BY start
+            ORDER BY start DESC
         """)
         for r in rows:
             wtype = r[0].replace("HKWorkoutActivityType", "") if r[0] else "Other"
+            start_time = r[3].strftime("%H:%M") if r[3] else None
             result["workouts"].append({
                 "type": wtype,
                 "duration_min": round(float(r[1])) if r[1] else 0,
                 "kcal": round(float(r[2])) if r[2] else 0,
+                "time": start_time,
             })
 
     # Strain score (0-100) based on active kcal vs personal average
@@ -650,6 +652,34 @@ def get_today(parquet_dir: str | Path) -> dict[str, Any]:
             "sleep_score": round(recovery_today["sleep_score"] * 100) if recovery_today.get("sleep_score") is not None else None,
         },
         "tip": tip,
+    }
+
+    # SpO2 + Respiratory Rate (latest today)
+    spo2_val = None
+    p = parquet_dir / "spo2.parquet"
+    if p.exists():
+        rows = _query(parquet_dir, f"""
+            SELECT value FROM read_parquet('{p.as_posix()}')
+            WHERE CAST(start AS DATE) = current_date
+            ORDER BY start DESC LIMIT 1
+        """)
+        if rows and rows[0][0]:
+            spo2_val = round(float(rows[0][0]) * 100, 1)  # stored as 0-1
+
+    rr_val = None
+    p = parquet_dir / "respiratory_rate.parquet"
+    if p.exists():
+        rows = _query(parquet_dir, f"""
+            SELECT value FROM read_parquet('{p.as_posix()}')
+            WHERE CAST(start AS DATE) = current_date
+            ORDER BY start DESC LIMIT 1
+        """)
+        if rows and rows[0][0]:
+            rr_val = round(float(rows[0][0]), 1)
+
+    payload["vitals"] = {
+        "spo2": spo2_val,
+        "rr": rr_val,
     }
 
     # Weather + Air quality

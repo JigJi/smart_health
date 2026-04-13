@@ -113,7 +113,7 @@ export type TodayData = {
     label: string;
     active_kcal: number;
     steps: number;
-    workouts: { type: string; duration_min: number; kcal: number }[];
+    workouts: { type: string; duration_min: number; kcal: number; time?: string }[];
   };
   recovery: {
     score: number | null;
@@ -122,6 +122,10 @@ export type TodayData = {
     sleep_score: number | null;
   };
   tip: string;
+  vitals?: {
+    spo2: number | null;
+    rr: number | null;
+  };
   weather?: {
     temp: number | null;
     weather: string;

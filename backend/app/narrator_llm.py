@@ -5,17 +5,19 @@ from __future__ import annotations
 import os
 import json
 from typing import Any
+from pathlib import Path
 
 import ssl
 import urllib.request
 import urllib.error
 
-OPENROUTER_KEY = os.environ.get(
-    "OPENROUTER_API_KEY",
-    "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",
-)
+# Load .env from backend root
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "anthropic/claude-3.5-haiku"
+MODEL = "google/gemini-2.0-flash-lite-001"
 
 # Simple cache: (date, score) → narration
 _cache: dict[str, tuple[int, str]] = {}  # date → (score, text)
@@ -48,14 +50,16 @@ def narrate_today(data: dict[str, Any]) -> str | None:
     strain = data.get("strain", {})
     recovery = data.get("recovery", {})
 
-    prompt = f"""เขียนสรุปสุขภาพวันนี้ 2-3 ประโยค ภาษาไทย ย่อหน้าเดียว
+    prompt = f"""เขียนสรุปสุขภาพวันนี้ 3-4 ประโยค ภาษาไทย ย่อหน้าเดียว ห้ามสั้นกว่า 3 ประโยค
 
 สไตล์:
 - เหมือนโค้ชส่วนตัวที่รู้จักคุณดี พูดตรงๆ แต่ไม่ดราม่า
 - เล่าข้อเท็จจริงที่เกิดขึ้น ไม่ตัดสิน ไม่น่ากลัว
-- ถ้าออกกำลังกายไปแล้ว ให้ acknowledge สิ่งที่ทำไปแล้ว ไม่ต้องแนะนำเพิ่ม
+- ถ้าออกกำลังกายไปแล้ว ให้พูดถึงสิ่งที่ทำไปแล้วเท่านั้น
+- ห้ามแนะนำให้ออกกำลังกาย ห้ามเชียร์ ห้ามบอกว่า "ลองไป" "น่าจะ" "ควรจะ" "ถ้าได้...จะดี"
+- ห้ามให้คำแนะนำใดๆ ทั้งสิ้น ไม่ว่าจะเป็นการออกกำลังกาย การนอน การกิน
+- แค่เล่าว่าร่างกายเป็นยังไงตอนนี้ จบ
 - ห้ามใช้คำว่า "ทรุด" "ดึงดัน" "อันตราย" "แบตเตอรี่" หรือคำดราม่า
-- ห้ามให้คำแนะนำสุขภาพ ห้ามสั่ง
 - ห้ามใช้ "เธอ" ใช้ "คุณ" หรือไม่มีสรรพนาม
 - ไม่ใส่ emoji ไม่ขึ้นหัวข้อ
 - ห้ามพูดถึงคะแนน เปอร์เซ็นต์ หรือตัวเลข HRV/RHR
