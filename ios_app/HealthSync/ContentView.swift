@@ -1,13 +1,47 @@
+//
+//  ContentView.swift
+//  HealthSync
+//
+//  Created by Jirawat Sangthong on 12/4/2569 BE.
+//
+
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject var hk: HealthKitManager
+
+    // TODO: เปลี่ยนเป็น IP จริงของ Mac
+    let dashboardURL = "http://192.168.1.38:3400"
+
+    var body: some View {
+        TabView {
+            // Tab 1: Dashboard (WebView)
+            WebViewContainer(url: URL(string: dashboardURL)!)
+                .ignoresSafeArea()
+                .tabItem {
+                    Image(systemName: "heart.text.square")
+                    Text("สรุป")
+                }
+
+            // Tab 2: Sync status
+            SyncView()
+                .environmentObject(hk)
+                .tabItem {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text("Sync")
+                }
+        }
+        .tint(.green)
+    }
+}
+
+struct SyncView: View {
     @EnvironmentObject var hk: HealthKitManager
 
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
 
-            // Status icon
             Image(systemName: hk.isAuthorized ? "checkmark.circle.fill" : "heart.circle")
                 .font(.system(size: 80))
                 .foregroundColor(hk.isAuthorized ? .green : .gray)
@@ -15,7 +49,7 @@ struct ContentView: View {
             Text("สุขภาพดี")
                 .font(.title.bold())
 
-            Text(hk.isAuthorized ? "เชื่อมต่อแล้ว ✅" : "กำลังเชื่อมต่อ...")
+            Text(hk.isAuthorized ? "เชื่อมต่อแล้ว" : "กำลังเชื่อมต่อ...")
                 .foregroundColor(.secondary)
 
             if hk.isAuthorized {

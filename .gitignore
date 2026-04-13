@@ -29,7 +29,6 @@ backend/data/journal.jsonl
 .idea/
 
 # iOS
-*.xcodeproj/
 *.xcworkspace/
 DerivedData/
 *.ipa

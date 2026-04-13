@@ -1,3 +1,10 @@
+//
+//  HealthKitManager.swift
+//  HealthSync
+//
+//  Created by Jirawat Sangthong on 12/4/2569 BE.
+//
+
 import Foundation
 import HealthKit
 import Combine

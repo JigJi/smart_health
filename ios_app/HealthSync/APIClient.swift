@@ -1,9 +1,16 @@
+//
+//  APIClient.swift
+//  HealthSync
+//
+//  Created by Jirawat Sangthong on 12/4/2569 BE.
+//
+
 import Foundation
 
 class APIClient {
     // TODO: เปลี่ยนเป็น URL จริงของ backend
-    // ตอน dev ใช้ Tailscale IP หรือ ngrok
-    static let baseURL = "http://100.105.182.33:8401"
+    // ตอน dev ใช้ localhost ถ้ารัน backend บน Mac เครื่องเดียวกัน
+    static let baseURL = "http://172.20.10.2:8401"
 
     func postSync(payload: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: "\(Self.baseURL)/sync/shortcut") else {
@@ -14,7 +21,6 @@ class APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        // TODO: ใส่ LINE user ID เพื่อแยก user
         request.setValue("default", forHTTPHeaderField: "X-User-Id")
         request.httpBody = payload.data(using: .utf8)
         request.timeoutInterval = 30

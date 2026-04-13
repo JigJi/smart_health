@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>เชื่อมต่อกับเซิร์ฟเวอร์สุขภาพในเครือข่ายเดียวกัน</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>เพื่อวิเคราะห์สุขภาพและส่งสรุปรายวันให้คุณ</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>ไม่ได้เขียนข้อมูล แค่อ่านเท่านั้น</string>
+</dict>
+</plist>
