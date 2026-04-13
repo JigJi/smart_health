@@ -31,6 +31,7 @@ from .auto_insights import auto_insights
 from .sync import receive_sync
 from .smart_narrator import narrate_day
 from .shortcut_sync import sync_from_shortcut
+from .readiness import get_today
 
 
 BASE = Path(__file__).resolve().parent.parent
@@ -45,7 +46,7 @@ app = FastAPI(title="smart_health", version="0.1.0")
 # Next.js dev server runs on 3400 (see README).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3400", "http://127.0.0.1:3400", "http://localhost:3401"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -227,6 +228,12 @@ async def sync_shortcut(request: Request) -> dict[str, Any]:
 def narrate(day: str | None = None) -> dict[str, Any]:
     """Personalized daily assessment from smart narrator."""
     return narrate_day(PARQUET_DIR, day)
+
+
+@app.get("/today")
+def today_endpoint() -> dict[str, Any]:
+    """Unified daily dashboard — readiness, strain, recovery, sleep, tip."""
+    return get_today(PARQUET_DIR)
 
 
 @app.get("/overview")

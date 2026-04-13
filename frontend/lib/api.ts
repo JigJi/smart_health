@@ -1,4 +1,4 @@
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8400';
+const API = '';
 
 export type TimelineEvent = {
   kind: 'anomaly' | 'gap' | 'drift' | 'training' | 'annotation';
@@ -91,4 +91,41 @@ export const api = {
   rhr: (days = 90) => j<any[]>(`/metrics/rhr?days=${days}`),
   recovery: (days = 30) => j<any[]>(`/recovery?days=${days}`),
   status: () => j<{ parquet_dir: string; files: Record<string, number> }>('/status'),
+  today: () => j<TodayData>('/api/today'),
+};
+
+export type TodayData = {
+  date: string;
+  day_th: string;
+  readiness: number;
+  readiness_label: string;
+  color: 'green' | 'yellow' | 'red';
+  reason: string;
+  signals: {
+    hrv: { value: number | null; baseline: number | null; status: string };
+    rhr: { value: number | null; baseline: number | null; status: string };
+    sleep: { hours: number | null; quality: string; bedtime: string | null; wakeup: string | null };
+    prev_steps: { value: number | null; status: string };
+    streak: number;
+  };
+  strain: {
+    score: number;
+    label: string;
+    active_kcal: number;
+    steps: number;
+    workouts: { type: string; duration_min: number; kcal: number }[];
+  };
+  recovery: {
+    score: number | null;
+    hrv_score: number | null;
+    rhr_score: number | null;
+    sleep_score: number | null;
+  };
+  tip: string;
+  weather?: {
+    temp: number | null;
+    weather: string;
+    pm25: number | null;
+    pm25_label: string;
+  };
 };

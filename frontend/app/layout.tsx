@@ -2,14 +2,14 @@ import './globals.css';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'smart_health',
-  description: 'Apple Health recovery & strain dashboard',
+  title: 'สุขภาพดี',
+  description: 'ผู้ช่วยสุขภาพส่วนตัว',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="th">
+      <body className="bg-bg text-primary antialiased">{children}</body>
     </html>
   );
 }
