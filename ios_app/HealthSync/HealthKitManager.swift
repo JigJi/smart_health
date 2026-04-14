@@ -26,6 +26,10 @@ class HealthKitManager: ObservableObject {
     @Published var backfillProgress: Double = 0.0
     @Published var backfillStatus = ""
 
+    // Sync throttle — don't re-sync if we synced less than this ago
+    private var lastSyncAt: Date?
+    private let syncMinInterval: TimeInterval = 3600  // 1 hour
+
     // Request permission for ALL types we might ever use — ask once, never prompt again.
     // เหตุผล: ถ้าเพิ่ม type ใหม่ภายหลัง iOS จะต้องขอใหม่ ผู้ใช้จะรู้สึกรำคาญ
     private let readTypes: Set<HKObjectType> = [
@@ -115,14 +119,32 @@ class HealthKitManager: ObservableObject {
 
     // MARK: - Sync
 
-    func syncNow() {
-        // Prevent concurrent syncs
-        if isSyncing { return }
-        DispatchQueue.main.async {
-            self.isSyncing = true
-            self.syncProgress = 0.0
-            self.syncStatus = "กำลัง sync..."
+    func syncNow(force: Bool = false) {
+        // Run entire check-and-set atomically on main queue to avoid race
+        // from multiple scenePhase / observer callbacks firing concurrently
+        if Thread.isMainThread {
+            _syncNowInternal(force: force)
+        } else {
+            DispatchQueue.main.async { self._syncNowInternal(force: force) }
         }
+    }
+
+    private func _syncNowInternal(force: Bool) {
+        // Prevent concurrent syncs (atomic on main thread)
+        if isSyncing { return }
+
+        // Throttle: skip if recent sync unless forced
+        if !force, let last = lastSyncAt,
+           Date().timeIntervalSince(last) < syncMinInterval {
+            // Just refresh dashboard — no actual HealthKit pull needed
+            syncCompletedCount += 1
+            return
+        }
+
+        isSyncing = true
+        syncProgress = 0.0
+        syncStatus = "กำลัง sync..."
+        lastSyncAt = Date()
 
         // 10 phases: 9 fetches (HR/HRV/RHR/Steps/Cal/SpO2/RR/Sleep/Workouts) + 1 post
         let phaseStep = 1.0 / 10.0
@@ -310,19 +332,24 @@ class HealthKitManager: ObservableObject {
     /// After completion, mark `didBackfill=true` so it never runs again on this device.
     /// Subsequent app opens just call `syncNow()` (incremental 25h).
     func initialBackfillIfNeeded() {
+        // Atomic check-and-set on main thread (same pattern as syncNow)
+        if Thread.isMainThread {
+            _initialBackfillInternal()
+        } else {
+            DispatchQueue.main.async { self._initialBackfillInternal() }
+        }
+    }
+
+    private func _initialBackfillInternal() {
         if UserDefaults.standard.bool(forKey: "didBackfill") {
-            // Already backfilled — fall through to normal incremental sync
             syncNow()
             return
         }
-        // Don't start if already in progress
         if isBackfilling { return }
 
-        DispatchQueue.main.async {
-            self.isBackfilling = true
-            self.backfillProgress = 0.0
-            self.backfillStatus = "กำลังตั้งค่าครั้งแรก…"
-        }
+        isBackfilling = true
+        backfillProgress = 0.0
+        backfillStatus = "กำลังตั้งค่าครั้งแรก…"
 
         // 60 chunks × 30 days = 5 years backwards from now
         let chunkDays = 30
