@@ -410,15 +410,14 @@ def _compute_tips(
     if hrv_pct is not None and hrv_pct <= -15 and not has_workout and now_hour < 19:
         personal = personalize_recovery_tip(profile, is_weekend)
         if personal:
-            personal["headline"] = f"HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}%"
+            personal["headline"] = f"ออกกำลังเบาๆ หรือพัก (HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}%)"
             tips.append(personal)
         else:
-            # Fallback if no history yet
             tips.append({
                 "category": "recovery",
-                "headline": f"HRV ต่ำกว่าปกติประมาณ {abs(int(hrv_pct))}%",
+                "headline": f"ออกกำลังเบาๆ หรือพัก (HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}%)",
                 "options": [
-                    "Active recovery (light cardio)",
+                    "กิจกรรมเบาๆ เช่น เดินหรือปั่นเบา",
                     "เลี่ยง session หนักวันนี้",
                 ],
             })
@@ -427,26 +426,26 @@ def _compute_tips(
     elif hrv_pct is not None and hrv_pct <= -8 and streak >= 3:
         personal = personalize_recovery_tip(profile, is_weekend)
         if personal:
-            personal["headline"] = f"ออกกำลังติด {streak} วัน + HRV เริ่มลง"
+            personal["headline"] = f"พักให้ระบบประสาท reset (ออกกำลังติด {streak} วัน + HRV ลง)"
             tips.append(personal)
         else:
             tips.append({
                 "category": "recovery",
-                "headline": f"ออกกำลังติดกัน {streak} วัน + HRV เริ่มลง",
-                "options": ["Active recovery (เดิน เบา)", "เลี่ยง session เข้ม"],
+                "headline": f"พักหรือออกกำลังเบา (ออกกำลังติด {streak} วัน + HRV ลง)",
+                "options": ["เดินเบาๆ", "เลี่ยง session เข้ม"],
             })
 
     # Rule 3: Ready for high intensity → personalized performance tip
     elif hrv_pct is not None and hrv_pct >= 10 and not has_workout and streak <= 2:
         personal = personalize_performance_tip(profile, is_weekend)
         if personal:
-            personal["headline"] = f"HRV สูงกว่าปกติ {int(hrv_pct)}% · ร่างกายพร้อม"
+            personal["headline"] = f"ออกกำลังเต็มที่ได้ (HRV สูงกว่าปกติ {int(hrv_pct)}%)"
             tips.append(personal)
         else:
             tips.append({
                 "category": "performance",
-                "headline": "ร่างกายอยู่ในภาวะพร้อม",
-                "options": ["Strength session", "HIIT / intervals"],
+                "headline": f"ออกกำลังเต็มที่ได้ (HRV สูงกว่าปกติ {int(hrv_pct)}%)",
+                "options": ["Session หนัก", "HIIT หรือรอบเข้ม"],
             })
 
     # Rule 4: Late bedtime pattern + HRV dip
@@ -458,7 +457,7 @@ def _compute_tips(
             if is_late:
                 tips.append({
                     "category": "sleep",
-                    "headline": f"เข้านอน {bedtime} + HRV ต่ำ",
+                    "headline": f"เข้านอนเร็วขึ้น (เข้านอน {bedtime} + HRV ต่ำ)",
                     "options": [
                         "คืนนี้ลองเข้านอน 23:00–23:30",
                         "HRV มักดีขึ้นภายใน 1 คืน ถ้าปรับจังหวะการนอนได้",
@@ -472,7 +471,7 @@ def _compute_tips(
     if sleep_hours is not None and sleep_hours < 6 and 11 <= now_hour <= 15:
         tips.append({
             "category": "sleep",
-            "headline": f"นอนแค่ {sleep_hours} ชม. เมื่อคืน",
+            "headline": f"งีบชดเชย (นอนแค่ {sleep_hours} ชม. เมื่อคืน)",
             "options": [
                 "งีบ 20–30 นาที ก่อนบ่าย 3 โมง",
                 "ช่วยให้ HRV และความตื่นตัวดีขึ้นชัดเจน",
@@ -484,7 +483,7 @@ def _compute_tips(
     if prev_steps is not None and prev_steps < 3000 and 15 <= now_hour <= 20 and not has_workout:
         tips.append({
             "category": "habit",
-            "headline": "เคลื่อนไหวน้อยเมื่อวาน",
+            "headline": "เดินสั้นๆ (เคลื่อนไหวน้อยเมื่อวาน)",
             "options": [
                 "เดิน 15–20 นาที ไม่ต้องวางแผนอะไรมาก",
                 "ช่วยการไหลเวียนเลือด ดีกว่านั่งอยู่นิ่งๆ",
@@ -496,12 +495,12 @@ def _compute_tips(
         not has_workout and streak == 0 and 9 <= now_hour <= 19):
         top = profile.get("top_types", [])[:3]
         if top:
-            opts = [f"{name} — กิจกรรมที่คุณทำบ่อย ({count} ครั้งในปีหลัง)" for name, count in top]
+            opts = [name for name, _ in top]
         else:
-            opts = ["กลับมาเคลื่อนไหวเบาๆ ก่อน", "ยังไม่ต้อง hard session"]
+            opts = ["กิจกรรมเบาๆ ก่อน", "ยังไม่ต้อง session หนัก"]
         tips.append({
             "category": "habit_personal",
-            "headline": "ไม่ได้ออกกำลังมาสักพัก + recovery ดี",
+            "headline": "กลับมาเคลื่อนไหว (ไม่ได้ออกกำลังมาสักพัก + ฟื้นตัวดี)",
             "options": opts,
         })
 
