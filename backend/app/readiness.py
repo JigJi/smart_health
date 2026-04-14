@@ -409,7 +409,8 @@ def _compute_tips(
     has_history = profile.get("has_exercise_history", False)
 
     # Rule 1: HRV warning → recovery tip (personalized OR gentle wellness for no-history users)
-    if hrv_pct is not None and hrv_pct <= -15 and not has_workout and now_hour < 19:
+    # No time-of-day gate — HRV signal valid anytime, user judges intensity themselves
+    if hrv_pct is not None and hrv_pct <= -15 and not has_workout:
         if has_history:
             personal = personalize_recovery_tip(profile, is_weekend)
             if personal:
@@ -484,8 +485,9 @@ def _compute_tips(
         })
 
     # Rule 7: Everything green + streak 0-1 → kickstart (has_history only)
+    # 9–21 = generous window to include late-chronotype users
     if (hrv_pct is not None and hrv_pct >= 0 and
-        not has_workout and streak == 0 and 9 <= now_hour <= 19 and has_history):
+        not has_workout and streak == 0 and 9 <= now_hour <= 21 and has_history):
         top = profile.get("top_types", [])[:3]
         tips.append({
             "category": "habit_personal",
