@@ -139,6 +139,7 @@ export type TodayData = {
     sleep_score: number | null;
   };
   tip: string;
+  tips?: { category: string; headline: string; option: string }[];
   vitals?: {
     spo2: number | null;
     rr: number | null;

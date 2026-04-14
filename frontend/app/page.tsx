@@ -228,6 +228,7 @@ export default function Home() {
   const [selectedDate, setSelectedDate] = useState<string | undefined>();
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showTips, setShowTips] = useState(false);
 
   const loadDay = (date?: string, silent = false) => {
     if (!silent) setLoading(true);
@@ -466,6 +467,45 @@ export default function Home() {
           </div>
         );
       })()}
+
+      {/* Recommend for you — data-driven options (active: collapsed by default) */}
+      {data.tips && data.tips.length > 0 && (
+        <div className="mx-5 mb-4 animate-fade-up animate-delay-3">
+          <button
+            onClick={() => setShowTips(!showTips)}
+            className="w-full rounded-[16px] px-4 py-3 flex items-center justify-between"
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.06)',
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] text-white/70 font-medium">แนะนำสำหรับวันนี้</span>
+              <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-white/10 text-white/60 tabular-nums">
+                {data.tips.length}
+              </span>
+            </div>
+            <span className="text-white/30 text-sm">{showTips ? '▲' : '▼'}</span>
+          </button>
+
+          {showTips && (
+            <div className="mt-2 space-y-2 animate-fade-up">
+              {data.tips.map((tip, i) => (
+                <div key={i} className="rounded-[14px] p-3.5" style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                }}>
+                  <div className="text-[13px] text-white/90 font-medium mb-1.5">{tip.headline}</div>
+                  <div className="text-[13px] text-white/60 leading-[1.7]">{tip.option}</div>
+                </div>
+              ))}
+              <div className="text-[11px] text-white/20 text-center pt-1 pb-0.5">
+                · ตัดสินใจเอง app แค่ส่อง mirror ·
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Health Monitor — Bevel-style grid */}
       <div className="mx-5 mb-4 animate-fade-up animate-delay-4">

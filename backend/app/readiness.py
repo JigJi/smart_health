@@ -374,6 +374,95 @@ def compute_readiness(
     return score, label, color, reason
 
 
+def _compute_tips(
+    hrv_val: float | None, hrv_base: float | None,
+    rhr_val: float | None, rhr_base: float | None,
+    sleep_hours: float | None, bedtime: str | None,
+    workouts_today: list, streak: int,
+    prev_steps: float | None,
+) -> list[dict[str, str]]:
+    """Data-driven suggestions (active mode — user opts in to see them).
+
+    All rules tied to user's own metric deviations + time of day.
+    NO prescriptive language (ห้าม "ควร", "ต้อง"). Option-framed only.
+    Returns 0-3 tips prioritized by severity.
+    """
+    from datetime import datetime
+    tips: list[dict[str, str]] = []
+    now_hour = datetime.now().hour
+
+    hrv_pct = ((hrv_val - hrv_base) / hrv_base * 100) if (hrv_val and hrv_base) else None
+    rhr_diff = (rhr_val - rhr_base) if (rhr_val and rhr_base) else None
+    has_workout = len(workouts_today) > 0
+
+    # Rule 1: HRV warning + no workout yet → active recovery option
+    if hrv_pct is not None and hrv_pct <= -15 and not has_workout and now_hour < 19:
+        tips.append({
+            "category": "recovery",
+            "headline": f"HRV ต่ำกว่าปกติประมาณ {abs(int(hrv_pct))}%",
+            "option": "Zone 2 cardio 30–45 นาที หรือ yoga / stretching น่าจะช่วย parasympathetic ฟื้นกว่าพักเฉยๆ · HIIT กับ weights หนักอาจ delay recovery อีก 1–2 วัน",
+        })
+
+    # Rule 2: Overtraining signal — streak long + HRV declining
+    elif hrv_pct is not None and hrv_pct <= -8 and streak >= 3:
+        tips.append({
+            "category": "recovery",
+            "headline": f"ออกกำลังติดกัน {streak} วัน + HRV เริ่มลง",
+            "option": "Active recovery (เดิน/ว่ายน้ำเบา) แทน session เข้มวันนี้ รักษา consistency + ให้ระบบประสาทได้ reset",
+        })
+
+    # Rule 3: Ready for high intensity
+    elif hrv_pct is not None and hrv_pct >= 10 and not has_workout and streak <= 2:
+        tips.append({
+            "category": "performance",
+            "headline": "ร่างกายอยู่ในภาวะพร้อม",
+            "option": "วันนี้ capacity เต็ม · strength, HIIT, หรือ long cardio ใช้ประโยชน์ได้เต็มกว่า session เบา",
+        })
+
+    # Rule 4: Late bedtime pattern + HRV dip
+    if bedtime and hrv_pct is not None and hrv_pct < -5:
+        try:
+            bt_h = int(bedtime.split(':')[0])
+            bt_m = int(bedtime.split(':')[1])
+            is_late = (1 <= bt_h <= 5) or (bt_h == 0 and bt_m >= 30)
+            if is_late:
+                tips.append({
+                    "category": "sleep",
+                    "headline": f"เข้านอน {bedtime} + HRV ต่ำ",
+                    "option": "คืนนี้ลอง 23:00–23:30 — HRV มัก response ภายใน 1 คืน ถ้า circadian alignment ดีขึ้น",
+                })
+        except (ValueError, IndexError):
+            pass
+
+    # Rule 5: Short sleep + early/mid-day → nap opportunity
+    if sleep_hours is not None and sleep_hours < 6 and 11 <= now_hour <= 15:
+        tips.append({
+            "category": "sleep",
+            "headline": f"นอนแค่ {sleep_hours} ชม. เมื่อคืน",
+            "option": "Power nap 20–30 นาที (ก่อน 15:00) boost HRV + alertness · เกิน 30 นาทีเข้า deep sleep ตื่นจะงงแทน",
+        })
+
+    # Rule 6: Low movement + afternoon
+    if prev_steps is not None and prev_steps < 3000 and 15 <= now_hour <= 20 and not has_workout:
+        tips.append({
+            "category": "habit",
+            "headline": "เคลื่อนไหวน้อยเมื่อวาน",
+            "option": "เดิน 15–20 นาทีวันนี้ — circulation + HRV response ดีกว่า sedentary · ไม่ต้อง structure แค่เดินเล่นก็พอ",
+        })
+
+    # Rule 7: Everything green + streak 0-1 → gentle habit nudge
+    if (hrv_pct is not None and hrv_pct >= 0 and
+        not has_workout and streak == 0 and 9 <= now_hour <= 19):
+        tips.append({
+            "category": "habit",
+            "headline": "ไม่ได้ออกกำลังมาแล้ว + recovery ดี",
+            "option": "walk, swim, หรือ light cardio 30 นาที kick start ง่ายที่สุด · ไม่ต้อง hard session ก็ได้ momentum",
+        })
+
+    # Cap at 3 tips — too many dilutes signal
+    return tips[:3]
+
+
 def _generate_tip(
     score: int, streak: int, prev_steps: float | None,
     sleep_hours: float | None, dow: int,
@@ -639,6 +728,14 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
     already_worked_out = len(strain_data.get("workouts", [])) > 0
     tip = _generate_tip(score, streak, prev_steps, sleep_hours, dow, already_worked_out)
 
+    # Data-driven tips (active mode — user opts in by tapping to expand)
+    tips = _compute_tips(
+        hrv_val, hrv_base, rhr_val, rhr_base,
+        sleep_hours, sleep_data.get("bedtime"),
+        strain_data.get("workouts", []), streak,
+        prev_steps,
+    )
+
     # Day name in Thai
     thai_days = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
 
@@ -685,6 +782,7 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
             "sleep_score": sleep_pct,
         },
         "tip": tip,
+        "tips": tips,
     }
 
     # SpO2 + Respiratory Rate — average across today's samples
