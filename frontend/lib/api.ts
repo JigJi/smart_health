@@ -140,6 +140,7 @@ export type TodayData = {
   };
   tip: string;
   tips?: { category: string; headline: string; options: string[] }[];
+  tips_personalized?: boolean;
   vitals?: {
     spo2: number | null;
     rr: number | null;

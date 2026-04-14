@@ -406,47 +406,40 @@ def _compute_tips(
     # Build user profile once (cached nowhere — runs per request; fast on parquet)
     profile = build_activity_profile(parquet_dir)
 
-    # Rule 1: HRV warning + no workout → personalized recovery tip
+    has_history = profile.get("has_exercise_history", False)
+
+    # Rule 1: HRV warning → recovery tip (personalized OR gentle wellness for no-history users)
     if hrv_pct is not None and hrv_pct <= -15 and not has_workout and now_hour < 19:
-        personal = personalize_recovery_tip(profile, is_weekend)
-        if personal:
-            personal["headline"] = f"ออกกำลังเบาๆ หรือพัก (HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}%)"
-            tips.append(personal)
+        if has_history:
+            personal = personalize_recovery_tip(profile, is_weekend)
+            if personal:
+                personal["headline"] = f"ออกกำลังเบาๆ หรือพัก (HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}%)"
+                tips.append(personal)
         else:
+            # Sedentary / new user: gentle non-workout advice
             tips.append({
-                "category": "recovery",
-                "headline": f"ออกกำลังเบาๆ หรือพัก (HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}%)",
+                "category": "recovery_general",
+                "headline": f"ฟังร่างกายวันนี้ (HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}%)",
                 "options": [
-                    "กิจกรรมเบาๆ เช่น เดินหรือปั่นเบา",
-                    "เลี่ยง session หนักวันนี้",
+                    "เดินสั้นๆ 10–15 นาที ถ้ามีเวลา",
+                    "ดื่มน้ำให้พอ หลีกเลี่ยงคาเฟอีนตอนเย็น",
+                    "พยายามเข้านอนเร็วคืนนี้",
                 ],
             })
 
-    # Rule 2: Overtraining signal
-    elif hrv_pct is not None and hrv_pct <= -8 and streak >= 3:
+    # Rule 2: Overtraining signal — only applies if has workout history
+    elif hrv_pct is not None and hrv_pct <= -8 and streak >= 3 and has_history:
         personal = personalize_recovery_tip(profile, is_weekend)
         if personal:
             personal["headline"] = f"พักให้ระบบประสาท reset (ออกกำลังติด {streak} วัน + HRV ลง)"
             tips.append(personal)
-        else:
-            tips.append({
-                "category": "recovery",
-                "headline": f"พักหรือออกกำลังเบา (ออกกำลังติด {streak} วัน + HRV ลง)",
-                "options": ["เดินเบาๆ", "เลี่ยง session เข้ม"],
-            })
 
-    # Rule 3: Ready for high intensity → personalized performance tip
-    elif hrv_pct is not None and hrv_pct >= 10 and not has_workout and streak <= 2:
+    # Rule 3: High HRV → performance tip (only for users with exercise history)
+    elif hrv_pct is not None and hrv_pct >= 10 and not has_workout and streak <= 2 and has_history:
         personal = personalize_performance_tip(profile, is_weekend)
         if personal:
             personal["headline"] = f"ออกกำลังเต็มที่ได้ (HRV สูงกว่าปกติ {int(hrv_pct)}%)"
             tips.append(personal)
-        else:
-            tips.append({
-                "category": "performance",
-                "headline": f"ออกกำลังเต็มที่ได้ (HRV สูงกว่าปกติ {int(hrv_pct)}%)",
-                "options": ["Session หนัก", "HIIT หรือรอบเข้ม"],
-            })
 
     # Rule 4: Late bedtime pattern + HRV dip
     if bedtime and hrv_pct is not None and hrv_pct < -5:
@@ -490,18 +483,14 @@ def _compute_tips(
             ],
         })
 
-    # Rule 7: Everything green + streak 0-1 → gentle habit nudge (personalized)
+    # Rule 7: Everything green + streak 0-1 → kickstart (has_history only)
     if (hrv_pct is not None and hrv_pct >= 0 and
-        not has_workout and streak == 0 and 9 <= now_hour <= 19):
+        not has_workout and streak == 0 and 9 <= now_hour <= 19 and has_history):
         top = profile.get("top_types", [])[:3]
-        if top:
-            opts = [name for name, _ in top]
-        else:
-            opts = ["กิจกรรมเบาๆ ก่อน", "ยังไม่ต้อง session หนัก"]
         tips.append({
             "category": "habit_personal",
             "headline": "กลับมาเคลื่อนไหว (ไม่ได้ออกกำลังมาสักพัก + ฟื้นตัวดี)",
-            "options": opts,
+            "options": [name for name, _ in top],
         })
 
     # Cap at 3 tips — too many dilutes signal
@@ -781,6 +770,8 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         strain_data.get("workouts", []), streak,
         prev_steps,
     )
+    # Track whether tips are based on user's own history
+    tips_personalized = any(t.get("category", "").endswith("_personal") for t in tips)
 
     # Day name in Thai
     thai_days = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
@@ -829,6 +820,7 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         },
         "tip": tip,
         "tips": tips,
+        "tips_personalized": tips_personalized,
     }
 
     # SpO2 + Respiratory Rate — average across today's samples

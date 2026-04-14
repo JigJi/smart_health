@@ -113,6 +113,7 @@ def build_activity_profile(parquet_dir: str | Path, days: int = 365) -> dict[str
         "rest_rate_low_hrv_weekday": None,
         "rest_rate_low_hrv_weekend": None,
         "preferred_time": None,
+        "has_exercise_history": False,  # set True only when ≥5 workouts in period
     }
 
     if not wk_path.exists():
@@ -127,6 +128,9 @@ def build_activity_profile(parquet_dir: str | Path, days: int = 365) -> dict[str
         ORDER BY n DESC
     """).fetchall()
     profile["top_types"] = [(_th(t[0]), int(t[1])) for t in top_rows if t[1] >= 3]
+    # "Has history" = at least 5 workouts of ≥2 types in the period
+    total_workouts = sum(int(t[1]) for t in top_rows)
+    profile["has_exercise_history"] = total_workouts >= 5 and len(profile["top_types"]) >= 2
 
     # 2. Preferred time of day
     time_rows = con.execute(f"""
