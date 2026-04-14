@@ -475,40 +475,41 @@ export default function Home() {
             onClick={() => setShowTips(!showTips)}
             className="w-full rounded-[16px] px-4 py-3 flex items-center justify-between"
             style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.06)',
+              background: 'rgba(10,132,255,0.10)',
+              border: '1px solid rgba(10,132,255,0.25)',
+              boxShadow: '0 4px 16px rgba(10,132,255,0.08)',
             }}
           >
             <div className="flex items-center gap-2">
-              <span className="text-[13px] text-white/70 font-medium">แนะนำสำหรับวันนี้</span>
-              <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-white/10 text-white/60 tabular-nums">
+              <span className="text-[13px] font-medium" style={{ color: '#5AC8FA' }}>แนะนำสำหรับวันนี้</span>
+              <span className="text-[11px] px-1.5 py-0.5 rounded-full tabular-nums" style={{
+                background: 'rgba(10,132,255,0.2)',
+                color: '#5AC8FA',
+              }}>
                 {data.tips.length}
               </span>
             </div>
-            <span className="text-white/30 text-sm">{showTips ? '▲' : '▼'}</span>
+            <span className="text-sm" style={{ color: 'rgba(90,200,250,0.5)' }}>{showTips ? '▲' : '▼'}</span>
           </button>
 
           {showTips && (
             <div className="mt-2 space-y-2 animate-fade-up">
               {data.tips.map((tip, i) => (
                 <div key={i} className="rounded-[14px] p-3.5" style={{
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.05)',
+                  background: 'rgba(10,132,255,0.06)',
+                  border: '1px solid rgba(10,132,255,0.15)',
                 }}>
-                  <div className="text-[13px] text-white/90 font-medium mb-2">{tip.headline}</div>
+                  <div className="text-[13px] font-medium mb-2" style={{ color: '#7FD4FF' }}>{tip.headline}</div>
                   <ul className="space-y-1.5">
                     {tip.options.map((opt, j) => (
-                      <li key={j} className="text-[13px] text-white/60 leading-[1.6] flex gap-2">
-                        <span className="text-white/30 shrink-0">•</span>
+                      <li key={j} className="text-[13px] leading-[1.6] flex gap-2" style={{ color: 'rgba(255,255,255,0.72)' }}>
+                        <span className="shrink-0" style={{ color: '#5AC8FA' }}>•</span>
                         <span>{opt}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
               ))}
-              <div className="text-[11px] text-white/20 text-center pt-1 pb-0.5">
-                · ตัดสินใจเอง app แค่ส่อง mirror ·
-              </div>
             </div>
           )}
         </div>
