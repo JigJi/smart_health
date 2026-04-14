@@ -41,6 +41,48 @@ def _th(t: str) -> str:
     return WK_TH.get(_strip_hk_prefix(t), _strip_hk_prefix(t))
 
 
+# Activity descriptions per state — used to render option text
+# without referencing "you did this X times" (that context is in the footer)
+DESC_RECOVERY = {
+    "เวท": "เวท น้ำหนักเบา–ปานกลาง",
+    "เดิน": "เดิน 30–45 นาที (Zone 2 — พูดได้ไม่หอบ)",
+    "เครื่องเดิน": "เครื่องเดิน 20–30 นาที (Zone 2)",
+    "ปั่นจักรยาน": "ปั่นเบา 30–45 นาที",
+    "มวย": "มวย เทคนิค / shadow ไม่เต็ม",
+    "Functional Strength": "Functional ระดับเบา",
+    "ปิงปอง": "ปิงปอง / Tennis เบาๆ ไม่แข่ง",
+    "เทนนิส": "Tennis เบาๆ ไม่แข่ง",
+    "ว่ายน้ำ": "ว่ายน้ำ 20–30 นาทีเรื่อยๆ",
+    "HIIT": "HIIT เบา — intervals สั้น",
+    "วิ่ง": "Jog 20–30 นาที (Zone 2)",
+    "โยคะ": "โยคะ / stretching",
+    "Core": "Core / mobility",
+    "อื่นๆ": "activity เบาๆ",
+}
+
+DESC_PERFORMANCE = {
+    "เวท": "เวท session หนัก — compound lifts",
+    "เดิน": "เดินไกล / long walk",
+    "เครื่องเดิน": "เครื่องเดิน intervals",
+    "ปั่นจักรยาน": "ปั่นยาว หรือ interval",
+    "มวย": "มวย session เต็ม",
+    "Functional Strength": "Functional เต็ม session",
+    "ปิงปอง": "ปิงปอง / Tennis match",
+    "เทนนิส": "Tennis match",
+    "ว่ายน้ำ": "ว่ายน้ำ intervals",
+    "HIIT": "HIIT / intervals หนัก",
+    "วิ่ง": "Run intervals / tempo",
+    "โยคะ": "Power yoga / flow",
+    "Core": "Core / strength circuit",
+    "อื่นๆ": "activity เต็ม capacity",
+}
+
+
+def _describe(name: str, state: str) -> str:
+    table = DESC_RECOVERY if state == "recovery" else DESC_PERFORMANCE
+    return table.get(name, name)
+
+
 def build_activity_profile(parquet_dir: str | Path, days: int = 365) -> dict[str, Any]:
     """Analyze user's workout patterns + state-linked behavior.
 
@@ -193,10 +235,9 @@ def build_activity_profile(parquet_dir: str | Path, days: int = 365) -> dict[str
 
 
 def personalize_recovery_tip(profile: dict[str, Any], is_weekend: bool) -> dict[str, Any] | None:
-    """Given a low-HRV state, build a tip from user's actual past behavior.
-    Uses weekday or weekend bucket depending on today — patterns differ."""
+    """Low-HRV state: suggest activities from user's top list, described generically.
+    Uses weekday or weekend bucket to pick relevant types."""
     key = "weekend" if is_weekend else "weekday"
-    day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
     patterns = profile.get(f"low_hrv_patterns_{key}", [])
     rest_rate = profile.get(f"rest_rate_low_hrv_{key}")
 
@@ -204,37 +245,47 @@ def personalize_recovery_tip(profile: dict[str, Any], is_weekend: bool) -> dict[
         return None
 
     options: list[str] = []
-    for name, count in patterns[:2]:
-        options.append(f"{name} — เคยทำ {count} ครั้งใน{day_label}คล้ายกัน")
+    seen: set[str] = set()
+    for name, _count in patterns[:2]:
+        desc = _describe(name, "recovery")
+        if desc not in seen:
+            options.append(desc)
+            seen.add(desc)
 
+    # Include rest option if user historically rests often in this state
     if rest_rate is not None and rest_rate >= 0.2:
-        pct = int(rest_rate * 100)
-        options.append(f"พักเฉยๆ — เลือกทำ {pct}% ของ{day_label}แบบนี้")
+        options.append("พัก (ไม่ออกกำลัง)")
 
     if not options:
         return None
 
     return {
         "category": "recovery_personal",
-        "headline": f"{day_label}ที่ HRV ต่ำแบบนี้ คุณมักจะ…",
+        "headline": None,  # set by caller — includes HRV %
         "options": options[:3],
     }
 
 
 def personalize_performance_tip(profile: dict[str, Any], is_weekend: bool) -> dict[str, Any] | None:
-    """Given high-HRV state, what does user typically do (weekday vs weekend)?"""
+    """High-HRV state: pick from user's top types (weekday/weekend split)."""
     key = "weekend" if is_weekend else "weekday"
-    day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
     patterns = profile.get(f"high_hrv_patterns_{key}", [])
     if not patterns:
         return None
 
     options: list[str] = []
-    for name, count in patterns[:3]:
-        options.append(f"{name} — เคยทำ {count} ครั้งใน{day_label}ที่พร้อม")
+    seen: set[str] = set()
+    for name, _count in patterns[:3]:
+        desc = _describe(name, "performance")
+        if desc not in seen:
+            options.append(desc)
+            seen.add(desc)
+
+    if not options:
+        return None
 
     return {
         "category": "performance_personal",
-        "headline": f"{day_label}ที่ร่างกายพร้อมแบบนี้ คุณมักจะ…",
+        "headline": None,
         "options": options[:3],
     }

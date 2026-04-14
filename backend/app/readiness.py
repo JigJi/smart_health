@@ -410,8 +410,7 @@ def _compute_tips(
     if hrv_pct is not None and hrv_pct <= -15 and not has_workout and now_hour < 19:
         personal = personalize_recovery_tip(profile, is_weekend)
         if personal:
-            day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
-            personal["headline"] = f"HRV ต่ำ {abs(int(hrv_pct))}% · {day_label}ที่คล้ายกัน คุณมักจะ…"
+            personal["headline"] = f"HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}%"
             tips.append(personal)
         else:
             # Fallback if no history yet
@@ -428,8 +427,7 @@ def _compute_tips(
     elif hrv_pct is not None and hrv_pct <= -8 and streak >= 3:
         personal = personalize_recovery_tip(profile, is_weekend)
         if personal:
-            day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
-            personal["headline"] = f"ออกกำลังติด {streak} วัน + HRV ลง · {day_label}ที่คล้ายกัน คุณมักจะ…"
+            personal["headline"] = f"ออกกำลังติด {streak} วัน + HRV เริ่มลง"
             tips.append(personal)
         else:
             tips.append({
@@ -442,8 +440,7 @@ def _compute_tips(
     elif hrv_pct is not None and hrv_pct >= 10 and not has_workout and streak <= 2:
         personal = personalize_performance_tip(profile, is_weekend)
         if personal:
-            day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
-            personal["headline"] = f"ร่างกายพร้อมเต็มที่ · {day_label}ที่คล้ายกัน คุณมักจะ…"
+            personal["headline"] = f"HRV สูงกว่าปกติ {int(hrv_pct)}% · ร่างกายพร้อม"
             tips.append(personal)
         else:
             tips.append({
