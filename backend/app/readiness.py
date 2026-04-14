@@ -304,11 +304,16 @@ def compute_readiness(
             score -= 10
             reasons.append(f"HRV ต่ำกว่าปกติ ({hrv:.0f} ms)")
 
-    # RHR signal
+    # RHR signal — smooth gradient to avoid cliff at exactly diff=-3
+    # (0.5 bpm difference used to swing score by 10 points)
     if rhr is not None and rhr_base is not None:
         diff = rhr - rhr_base
-        if diff < -3:
+        if diff <= -4:
             score += 10
+        elif diff <= -2:
+            score += 6
+        elif diff <= -1:
+            score += 3
         elif diff > 6:
             score -= 15
             reasons.append(f"RHR สูงมาก ({rhr:.0f} vs ปกติ {rhr_base:.0f})")
