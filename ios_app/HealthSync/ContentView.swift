@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var hk: HealthKitManager
+    @Environment(\.scenePhase) private var scenePhase
 
     // TODO: เปลี่ยนเป็น tunnel URL ตอน deploy
     // uid query param lets the frontend forward X-User-Id to backend → data isolation per user
@@ -50,6 +51,13 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.25), value: hk.isSyncing)
         .onChange(of: hk.syncCompletedCount) { _, _ in
             webReloadTrigger += 1
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Always refresh dashboard data when app becomes active —
+            // independent of sync result (sync may have nothing to add)
+            if newPhase == .active {
+                webReloadTrigger += 1
+            }
         }
     }
 }
