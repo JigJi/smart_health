@@ -510,8 +510,8 @@ export default function Home() {
                   </ul>
                 </div>
               ))}
-              <div className="text-[11px] text-center pt-1 pb-0.5 leading-[1.5]" style={{ color: 'rgba(90,200,250,0.4)' }}>
-                ผลการแนะนำมาจากการวิเคราะห์<br/>สิ่งที่คุณเคยทำในช่วงที่ผ่านมา
+              <div className="text-[11px] text-center pt-1 pb-0.5" style={{ color: 'rgba(90,200,250,0.4)' }}>
+                ผลการแนะนำมาจากการวิเคราะห์สิ่งที่คุณเคยทำในช่วงที่ผ่านมา
               </div>
             </div>
           )}
