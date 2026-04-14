@@ -375,61 +375,78 @@ def compute_readiness(
 
 
 def _compute_tips(
+    parquet_dir: Path,
     hrv_val: float | None, hrv_base: float | None,
     rhr_val: float | None, rhr_base: float | None,
     sleep_hours: float | None, bedtime: str | None,
     workouts_today: list, streak: int,
     prev_steps: float | None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Data-driven suggestions (active mode — user opts in to see them).
 
-    All rules tied to user's own metric deviations + time of day.
-    NO prescriptive language (ห้าม "ควร", "ต้อง"). Option-framed only.
+    Personalized: uses user's own workout history. Options pulled from
+    what they actually did on similar-state days, not generic advice.
     Returns 0-3 tips prioritized by severity.
     """
     from datetime import datetime
-    tips: list[dict[str, str]] = []
+    from .personal_tips import (
+        build_activity_profile,
+        personalize_recovery_tip,
+        personalize_performance_tip,
+    )
+
+    tips: list[dict[str, Any]] = []
     now_hour = datetime.now().hour
 
     hrv_pct = ((hrv_val - hrv_base) / hrv_base * 100) if (hrv_val and hrv_base) else None
-    rhr_diff = (rhr_val - rhr_base) if (rhr_val and rhr_base) else None
     has_workout = len(workouts_today) > 0
 
-    # Rule 1: HRV warning + no workout yet → active recovery option
+    # Build user profile once (cached nowhere — runs per request; fast on parquet)
+    profile = build_activity_profile(parquet_dir)
+
+    # Rule 1: HRV warning + no workout → personalized recovery tip
     if hrv_pct is not None and hrv_pct <= -15 and not has_workout and now_hour < 19:
-        tips.append({
-            "category": "recovery",
-            "headline": f"HRV ต่ำกว่าปกติประมาณ {abs(int(hrv_pct))}%",
-            "options": [
-                "Zone 2 cardio 30–45 นาที (พูดได้ไม่หอบ)",
-                "Yoga หรือ stretching",
-                "เลี่ยง HIIT / weights หนัก — อาจ delay recovery 1–2 วัน",
-            ],
-        })
+        personal = personalize_recovery_tip(profile)
+        if personal:
+            # Prepend personalized headline with user's actual HRV %
+            personal["headline"] = f"HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}% · สถานะคล้ายในอดีต คุณมักจะ…"
+            tips.append(personal)
+        else:
+            # Fallback if no history yet
+            tips.append({
+                "category": "recovery",
+                "headline": f"HRV ต่ำกว่าปกติประมาณ {abs(int(hrv_pct))}%",
+                "options": [
+                    "Active recovery (light cardio)",
+                    "เลี่ยง session หนักวันนี้",
+                ],
+            })
 
-    # Rule 2: Overtraining signal — streak long + HRV declining
+    # Rule 2: Overtraining signal
     elif hrv_pct is not None and hrv_pct <= -8 and streak >= 3:
-        tips.append({
-            "category": "recovery",
-            "headline": f"ออกกำลังติดกัน {streak} วัน + HRV เริ่มลง",
-            "options": [
-                "Active recovery (เดิน / ว่ายน้ำเบา)",
-                "เลี่ยง session เข้มวันนี้ — ให้ระบบประสาท reset",
-                "รักษา streak ด้วย light activity แทน",
-            ],
-        })
+        personal = personalize_recovery_tip(profile)
+        if personal:
+            personal["headline"] = f"ออกกำลังติด {streak} วัน + HRV ลง · สถานะคล้ายในอดีต คุณมักจะ…"
+            tips.append(personal)
+        else:
+            tips.append({
+                "category": "recovery",
+                "headline": f"ออกกำลังติดกัน {streak} วัน + HRV เริ่มลง",
+                "options": ["Active recovery (เดิน เบา)", "เลี่ยง session เข้ม"],
+            })
 
-    # Rule 3: Ready for high intensity
+    # Rule 3: Ready for high intensity → personalized performance tip
     elif hrv_pct is not None and hrv_pct >= 10 and not has_workout and streak <= 2:
-        tips.append({
-            "category": "performance",
-            "headline": "ร่างกายอยู่ในภาวะพร้อม",
-            "options": [
-                "Strength / weights หนัก",
-                "HIIT หรือ interval training",
-                "Long cardio session",
-            ],
-        })
+        personal = personalize_performance_tip(profile)
+        if personal:
+            personal["headline"] = "ร่างกายพร้อมเต็มที่ · สถานะคล้ายในอดีต คุณมักจะ…"
+            tips.append(personal)
+        else:
+            tips.append({
+                "category": "performance",
+                "headline": "ร่างกายอยู่ในภาวะพร้อม",
+                "options": ["Strength session", "HIIT / intervals"],
+            })
 
     # Rule 4: Late bedtime pattern + HRV dip
     if bedtime and hrv_pct is not None and hrv_pct < -5:
@@ -473,17 +490,18 @@ def _compute_tips(
             ],
         })
 
-    # Rule 7: Everything green + streak 0-1 → gentle habit nudge
+    # Rule 7: Everything green + streak 0-1 → gentle habit nudge (personalized)
     if (hrv_pct is not None and hrv_pct >= 0 and
         not has_workout and streak == 0 and 9 <= now_hour <= 19):
+        top = profile.get("top_types", [])[:3]
+        if top:
+            opts = [f"{name} — กิจกรรมที่คุณทำบ่อย ({count} ครั้งในปีหลัง)" for name, count in top]
+        else:
+            opts = ["กลับมาเคลื่อนไหวเบาๆ ก่อน", "ยังไม่ต้อง hard session"]
         tips.append({
-            "category": "habit",
+            "category": "habit_personal",
             "headline": "ไม่ได้ออกกำลังมาสักพัก + recovery ดี",
-            "options": [
-                "Walk, swim, หรือ light cardio 30 นาที",
-                "Easy kick start — ไม่ต้อง hard session",
-                "ได้ momentum กลับมา",
-            ],
+            "options": opts,
         })
 
     # Cap at 3 tips — too many dilutes signal
@@ -757,6 +775,7 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
 
     # Data-driven tips (active mode — user opts in by tapping to expand)
     tips = _compute_tips(
+        parquet_dir,
         hrv_val, hrv_base, rhr_val, rhr_base,
         sleep_hours, sleep_data.get("bedtime"),
         strain_data.get("workouts", []), streak,
