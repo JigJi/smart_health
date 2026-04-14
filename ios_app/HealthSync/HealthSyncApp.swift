@@ -32,7 +32,8 @@ struct HealthSyncApp: App {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active && healthKit.isAuthorized {
-                    healthKit.syncNow()
+                    // First launch → backfill 5y. Subsequent launches → incremental sync.
+                    healthKit.initialBackfillIfNeeded()
                 }
             }
         }

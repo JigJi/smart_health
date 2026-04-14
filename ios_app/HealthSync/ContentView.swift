@@ -40,21 +40,26 @@ struct ContentView: View {
             }
             .tint(.green)
 
-            // Sync banner overlay — ชนิด native, ลอยบนสุด
-            if hk.isSyncing {
-                SyncBanner(progress: hk.syncProgress)
+            // Sync / backfill banner overlay — ชนิด native, ลอยบนสุด
+            if hk.isBackfilling {
+                SyncBanner(label: hk.backfillStatus.isEmpty ? "กำลังตั้งค่าครั้งแรก…" : hk.backfillStatus,
+                           progress: hk.backfillProgress)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            } else if hk.isSyncing {
+                SyncBanner(label: "Syncing data…", progress: hk.syncProgress)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.25), value: hk.isSyncing)
+        .animation(.easeInOut(duration: 0.25), value: hk.isBackfilling)
         .onChange(of: hk.syncCompletedCount) { _, _ in
             webReloadTrigger += 1
         }
         .onChange(of: scenePhase) { _, newPhase in
-            // Always refresh dashboard data when app becomes active —
-            // independent of sync result (sync may have nothing to add)
             if newPhase == .active {
                 webReloadTrigger += 1
             }
@@ -174,12 +179,13 @@ struct BulletRow: View {
 }
 
 struct SyncBanner: View {
+    let label: String
     let progress: Double  // 0.0 – 1.0
     @State private var rotation = 0.0
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("Syncing data…")
+            Text(label)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.white.opacity(0.9))
 

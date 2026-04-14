@@ -21,6 +21,11 @@ class HealthKitManager: ObservableObject {
     @Published var syncCompletedCount = 0
     @Published var syncProgress: Double = 0.0  // 0.0 – 1.0
 
+    // Initial backfill — runs once on first install to seed 5 years of history
+    @Published var isBackfilling = false
+    @Published var backfillProgress: Double = 0.0
+    @Published var backfillStatus = ""
+
     // Request permission for ALL types we might ever use — ask once, never prompt again.
     // เหตุผล: ถ้าเพิ่ม type ใหม่ภายหลัง iOS จะต้องขอใหม่ ผู้ใช้จะรู้สึกรำคาญ
     private let readTypes: Set<HKObjectType> = [
@@ -79,7 +84,8 @@ class HealthKitManager: ObservableObject {
                 self?.isAuthorized = ok
                 if ok {
                     self?.enableBackgroundDelivery()
-                    self?.syncNow()
+                    // First install → 5y backfill. Re-launches → incremental sync.
+                    self?.initialBackfillIfNeeded()
                 }
             }
         }
@@ -294,6 +300,236 @@ class HealthKitManager: ObservableObject {
                 ($0.startDate, $0.quantity.doubleValue(for: unit))
             } ?? []
             completion(samples)
+        }
+        store.execute(query)
+    }
+
+    // MARK: - Initial Backfill (first install)
+
+    /// On first install, fetch 5 years of HealthKit history → POST to backend in chunks.
+    /// After completion, mark `didBackfill=true` so it never runs again on this device.
+    /// Subsequent app opens just call `syncNow()` (incremental 25h).
+    func initialBackfillIfNeeded() {
+        if UserDefaults.standard.bool(forKey: "didBackfill") {
+            // Already backfilled — fall through to normal incremental sync
+            syncNow()
+            return
+        }
+        // Don't start if already in progress
+        if isBackfilling { return }
+
+        DispatchQueue.main.async {
+            self.isBackfilling = true
+            self.backfillProgress = 0.0
+            self.backfillStatus = "กำลังตั้งค่าครั้งแรก…"
+        }
+
+        // 60 chunks × 30 days = 5 years backwards from now
+        let chunkDays = 30
+        let totalChunks = 60
+        let cal = Calendar.current
+        let now = Date()
+        let chunks: [(Date, Date)] = (0..<totalChunks).map { i in
+            let end = cal.date(byAdding: .day, value: -i * chunkDays, to: now)!
+            let start = cal.date(byAdding: .day, value: -(i + 1) * chunkDays, to: now)!
+            return (start, end)
+        }
+
+        processChunksSequentially(chunks: chunks, index: 0)
+    }
+
+    private func processChunksSequentially(chunks: [(Date, Date)], index: Int) {
+        guard index < chunks.count else {
+            // All done
+            UserDefaults.standard.set(true, forKey: "didBackfill")
+            DispatchQueue.main.async {
+                self.backfillProgress = 1.0
+                self.backfillStatus = "ตั้งค่าครั้งแรกเสร็จ ✓"
+                // Brief pause so user sees 100%, then hide banner
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    self.isBackfilling = false
+                    self.syncCompletedCount += 1  // trigger dashboard refresh
+                }
+                // Then run normal incremental sync to catch any last-25h samples
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    self.syncNow()
+                }
+            }
+            return
+        }
+
+        let (start, end) = chunks[index]
+        backfillChunk(start: start, end: end) { [weak self] _ in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.backfillProgress = Double(index + 1) / Double(chunks.count)
+            }
+            // Recurse — sequential to avoid hammering backend
+            self.processChunksSequentially(chunks: chunks, index: index + 1)
+        }
+    }
+
+    private func backfillChunk(start: Date, end: Date, completion: @escaping (Bool) -> Void) {
+        let group = DispatchGroup()
+        var lines: [String] = []
+        let lock = NSLock()
+
+        // HR
+        group.enter()
+        fetchSamplesRange(.heartRate, start: start, end: end) { samples in
+            let mapped = samples.map { "HR|\(self.iso($0.0))|\(String(format: "%.0f", $0.1))" }
+            lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
+            group.leave()
+        }
+        // HRV
+        group.enter()
+        fetchSamplesRange(.heartRateVariabilitySDNN, start: start, end: end) { samples in
+            let mapped = samples.map { "HRV|\(self.iso($0.0))|\(String(format: "%.1f", $0.1))" }
+            lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
+            group.leave()
+        }
+        // RHR
+        group.enter()
+        fetchSamplesRange(.restingHeartRate, start: start, end: end) { samples in
+            let mapped = samples.map { "RHR|\(self.iso($0.0))|\(String(format: "%.0f", $0.1))" }
+            lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
+            group.leave()
+        }
+        // Steps
+        group.enter()
+        fetchSamplesRange(.stepCount, start: start, end: end) { samples in
+            let mapped = samples.map { "STEPS|\(self.iso($0.0))|\(String(format: "%.0f", $0.1))" }
+            lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
+            group.leave()
+        }
+        // Active Energy
+        group.enter()
+        fetchSamplesRange(.activeEnergyBurned, start: start, end: end) { samples in
+            let mapped = samples.map { "CAL|\(self.iso($0.0))|\(String(format: "%.1f", $0.1))" }
+            lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
+            group.leave()
+        }
+        // SpO2
+        group.enter()
+        fetchSamplesRange(.oxygenSaturation, start: start, end: end) { samples in
+            let mapped = samples.map { "SPO2|\(self.iso($0.0))|\(String(format: "%.3f", $0.1))" }
+            lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
+            group.leave()
+        }
+        // RR
+        group.enter()
+        fetchSamplesRange(.respiratoryRate, start: start, end: end) { samples in
+            let mapped = samples.map { "RR|\(self.iso($0.0))|\(String(format: "%.1f", $0.1))" }
+            lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
+            group.leave()
+        }
+        // Sleep
+        group.enter()
+        fetchSleepRange(start: start, end: end) { samples in
+            let mapped = samples.map { "SLEEP|\(self.iso($0.start))|\(self.iso($0.end))|\($0.stage)" }
+            lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
+            group.leave()
+        }
+        // Workouts
+        group.enter()
+        fetchWorkoutsRange(start: start, end: end) { workouts in
+            for w in workouts {
+                let type = w.workoutActivityType.name
+                let dur = String(format: "%.0f", w.duration / 60)
+                let s = self.iso(w.startDate)
+                var hrAvg = ""
+                var hrMax = ""
+                if let stats = w.statistics(for: HKQuantityType(.heartRate)) {
+                    if let avg = stats.averageQuantity() {
+                        hrAvg = String(format: "%.0f", avg.doubleValue(for: .count().unitDivided(by: .minute())))
+                    }
+                    if let mx = stats.maximumQuantity() {
+                        hrMax = String(format: "%.0f", mx.doubleValue(for: .count().unitDivided(by: .minute())))
+                    }
+                }
+                let line = "WK|\(type)|\(s)|\(dur)|\(hrAvg)|\(hrMax)"
+                lock.lock(); lines.append(line); lock.unlock()
+            }
+            group.leave()
+        }
+
+        group.notify(queue: .global()) { [weak self] in
+            guard let self = self else { completion(false); return }
+            if lines.isEmpty {
+                completion(true)
+                return
+            }
+            let payload = lines.joined(separator: "\n")
+            self.api.postSync(payload: payload) { ok in
+                completion(ok)
+            }
+        }
+    }
+
+    // MARK: - Range fetches (used by backfill)
+
+    private func fetchSamplesRange(
+        _ type: HKQuantityTypeIdentifier,
+        start: Date,
+        end: Date,
+        completion: @escaping ([(Date, Double)]) -> Void
+    ) {
+        let qt = HKQuantityType(type)
+        let pred = HKQuery.predicateForSamples(withStart: start, end: end)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+
+        let unit: HKUnit = {
+            switch type {
+            case .heartRate, .restingHeartRate, .respiratoryRate:
+                return .count().unitDivided(by: .minute())
+            case .heartRateVariabilitySDNN:
+                return .secondUnit(with: .milli)
+            case .stepCount:
+                return .count()
+            case .activeEnergyBurned:
+                return .kilocalorie()
+            case .oxygenSaturation:
+                return .percent()
+            default:
+                return .count()
+            }
+        }()
+
+        let query = HKSampleQuery(
+            sampleType: qt, predicate: pred, limit: 10000, sortDescriptors: [sort]
+        ) { _, results, _ in
+            let samples = (results as? [HKQuantitySample])?.map {
+                ($0.startDate, $0.quantity.doubleValue(for: unit))
+            } ?? []
+            completion(samples)
+        }
+        store.execute(query)
+    }
+
+    private func fetchSleepRange(start: Date, end: Date, completion: @escaping ([SleepSample]) -> Void) {
+        let qt = HKCategoryType(.sleepAnalysis)
+        let pred = HKQuery.predicateForSamples(withStart: start, end: end)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+
+        let query = HKSampleQuery(
+            sampleType: qt, predicate: pred, limit: 5000, sortDescriptors: [sort]
+        ) { _, results, _ in
+            let samples = (results as? [HKCategorySample])?.map { s -> SleepSample in
+                SleepSample(start: s.startDate, end: s.endDate, stage: sleepStageName(s.value))
+            } ?? []
+            completion(samples)
+        }
+        store.execute(query)
+    }
+
+    private func fetchWorkoutsRange(start: Date, end: Date, completion: @escaping ([HKWorkout]) -> Void) {
+        let pred = HKQuery.predicateForSamples(withStart: start, end: end)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+
+        let query = HKSampleQuery(
+            sampleType: .workoutType(), predicate: pred, limit: 200, sortDescriptors: [sort]
+        ) { _, results, _ in
+            completion(results as? [HKWorkout] ?? [])
         }
         store.execute(query)
     }
