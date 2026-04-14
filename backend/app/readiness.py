@@ -400,7 +400,11 @@ def _compute_tips(
         tips.append({
             "category": "recovery",
             "headline": f"HRV ต่ำกว่าปกติประมาณ {abs(int(hrv_pct))}%",
-            "option": "Zone 2 cardio 30–45 นาที หรือ yoga / stretching น่าจะช่วย parasympathetic ฟื้นกว่าพักเฉยๆ · HIIT กับ weights หนักอาจ delay recovery อีก 1–2 วัน",
+            "options": [
+                "Zone 2 cardio 30–45 นาที (พูดได้ไม่หอบ)",
+                "Yoga หรือ stretching",
+                "เลี่ยง HIIT / weights หนัก — อาจ delay recovery 1–2 วัน",
+            ],
         })
 
     # Rule 2: Overtraining signal — streak long + HRV declining
@@ -408,7 +412,11 @@ def _compute_tips(
         tips.append({
             "category": "recovery",
             "headline": f"ออกกำลังติดกัน {streak} วัน + HRV เริ่มลง",
-            "option": "Active recovery (เดิน/ว่ายน้ำเบา) แทน session เข้มวันนี้ รักษา consistency + ให้ระบบประสาทได้ reset",
+            "options": [
+                "Active recovery (เดิน / ว่ายน้ำเบา)",
+                "เลี่ยง session เข้มวันนี้ — ให้ระบบประสาท reset",
+                "รักษา streak ด้วย light activity แทน",
+            ],
         })
 
     # Rule 3: Ready for high intensity
@@ -416,7 +424,11 @@ def _compute_tips(
         tips.append({
             "category": "performance",
             "headline": "ร่างกายอยู่ในภาวะพร้อม",
-            "option": "วันนี้ capacity เต็ม · strength, HIIT, หรือ long cardio ใช้ประโยชน์ได้เต็มกว่า session เบา",
+            "options": [
+                "Strength / weights หนัก",
+                "HIIT หรือ interval training",
+                "Long cardio session",
+            ],
         })
 
     # Rule 4: Late bedtime pattern + HRV dip
@@ -429,7 +441,11 @@ def _compute_tips(
                 tips.append({
                     "category": "sleep",
                     "headline": f"เข้านอน {bedtime} + HRV ต่ำ",
-                    "option": "คืนนี้ลอง 23:00–23:30 — HRV มัก response ภายใน 1 คืน ถ้า circadian alignment ดีขึ้น",
+                    "options": [
+                        "คืนนี้ลอง bedtime 23:00–23:30",
+                        "HRV มัก response ภายใน 1 คืนถ้า circadian align",
+                        "ปิดจอ 30 นาทีก่อนนอน ช่วย melatonin rise",
+                    ],
                 })
         except (ValueError, IndexError):
             pass
@@ -439,7 +455,11 @@ def _compute_tips(
         tips.append({
             "category": "sleep",
             "headline": f"นอนแค่ {sleep_hours} ชม. เมื่อคืน",
-            "option": "Power nap 20–30 นาที (ก่อน 15:00) boost HRV + alertness · เกิน 30 นาทีเข้า deep sleep ตื่นจะงงแทน",
+            "options": [
+                "Power nap 20–30 นาที ก่อน 15:00",
+                "Boost HRV + alertness ได้ชัด",
+                "เลี่ยงเกิน 30 นาที — จะเข้า deep sleep ตื่นงง",
+            ],
         })
 
     # Rule 6: Low movement + afternoon
@@ -447,7 +467,10 @@ def _compute_tips(
         tips.append({
             "category": "habit",
             "headline": "เคลื่อนไหวน้อยเมื่อวาน",
-            "option": "เดิน 15–20 นาทีวันนี้ — circulation + HRV response ดีกว่า sedentary · ไม่ต้อง structure แค่เดินเล่นก็พอ",
+            "options": [
+                "เดิน 15–20 นาที ไม่ต้อง structure",
+                "Circulation + HRV response ดีกว่า sedentary",
+            ],
         })
 
     # Rule 7: Everything green + streak 0-1 → gentle habit nudge
@@ -455,8 +478,12 @@ def _compute_tips(
         not has_workout and streak == 0 and 9 <= now_hour <= 19):
         tips.append({
             "category": "habit",
-            "headline": "ไม่ได้ออกกำลังมาแล้ว + recovery ดี",
-            "option": "walk, swim, หรือ light cardio 30 นาที kick start ง่ายที่สุด · ไม่ต้อง hard session ก็ได้ momentum",
+            "headline": "ไม่ได้ออกกำลังมาสักพัก + recovery ดี",
+            "options": [
+                "Walk, swim, หรือ light cardio 30 นาที",
+                "Easy kick start — ไม่ต้อง hard session",
+                "ได้ momentum กลับมา",
+            ],
         })
 
     # Cap at 3 tips — too many dilutes signal

@@ -495,8 +495,15 @@ export default function Home() {
                   background: 'rgba(255,255,255,0.03)',
                   border: '1px solid rgba(255,255,255,0.05)',
                 }}>
-                  <div className="text-[13px] text-white/90 font-medium mb-1.5">{tip.headline}</div>
-                  <div className="text-[13px] text-white/60 leading-[1.7]">{tip.option}</div>
+                  <div className="text-[13px] text-white/90 font-medium mb-2">{tip.headline}</div>
+                  <ul className="space-y-1.5">
+                    {tip.options.map((opt, j) => (
+                      <li key={j} className="text-[13px] text-white/60 leading-[1.6] flex gap-2">
+                        <span className="text-white/30 shrink-0">•</span>
+                        <span>{opt}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               ))}
               <div className="text-[11px] text-white/20 text-center pt-1 pb-0.5">
