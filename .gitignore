@@ -4,6 +4,10 @@ __pycache__/
 .venv/
 .env
 
+# next.js env (Windows-server-specific config — set BACKEND_URL per host)
+.env.local
+.env.*.local
+
 # data (never commit health data)
 backend/data/raw/*
 backend/data/parquet/*

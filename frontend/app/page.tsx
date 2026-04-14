@@ -571,11 +571,6 @@ export default function Home() {
       )}
 
       {/* Tip — disabled, AI summary covers this */}
-      {false && data.tip && (
-        <div className="mx-5 glass-card p-4 animate-fade-up animate-delay-5">
-          <p className="text-sm text-white/50 leading-[1.7]">{data.tip}</p>
-        </div>
-      )}
     </main>
   );
 }

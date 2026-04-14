@@ -97,9 +97,9 @@ def parse_shortcut_text(text: str) -> dict[str, Any]:
     return {k: v for k, v in payload.items() if v}
 
 
-def sync_from_shortcut(parquet_dir: str | Path, text: str, user_id: str = "default") -> dict[str, Any]:
-    """Parse shortcut text and sync to per-user parquet directory."""
-    user_dir = Path(parquet_dir) / "users" / user_id
+def sync_from_shortcut(user_dir: str | Path, text: str, user_id: str = "default") -> dict[str, Any]:
+    """Parse shortcut text and sync to the caller-resolved per-user parquet dir."""
+    user_dir = Path(user_dir)
     user_dir.mkdir(parents=True, exist_ok=True)
     payload = parse_shortcut_text(text)
     counts = receive_sync(user_dir, payload)

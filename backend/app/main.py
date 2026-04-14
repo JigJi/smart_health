@@ -52,8 +52,15 @@ app.add_middleware(
 )
 
 
-def _store() -> HealthStore:
-    return HealthStore(PARQUET_DIR)
+def get_user_dir(x_user_id: str | None = Header(default=None)) -> Path:
+    user_id = (x_user_id or "default").strip() or "default"
+    user_dir = PARQUET_DIR / "users" / user_id
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return user_dir
+
+
+def get_store(user_dir: Path = Depends(get_user_dir)) -> HealthStore:
+    return HealthStore(user_dir)
 
 
 @app.get("/health")
@@ -62,21 +69,24 @@ def healthcheck() -> dict[str, str]:
 
 
 @app.get("/status")
-def status() -> dict[str, Any]:
+def status(user_dir: Path = Depends(get_user_dir)) -> dict[str, Any]:
     """List which parquet files exist + row counts — useful for 'am I ingested yet?'"""
     files: dict[str, int] = {}
-    for p in sorted(PARQUET_DIR.glob("*.parquet")):
+    for p in sorted(user_dir.glob("*.parquet")):
         try:
             import duckdb
             n = duckdb.sql(f"SELECT count(*) FROM read_parquet('{p.as_posix()}')").fetchone()[0]
         except Exception:
             n = -1
         files[p.stem] = n
-    return {"parquet_dir": str(PARQUET_DIR), "files": files}
+    return {"parquet_dir": str(user_dir), "files": files}
 
 
 @app.post("/ingest")
-async def ingest(file: UploadFile = File(...)) -> dict[str, Any]:
+async def ingest(
+    file: UploadFile = File(...),
+    user_dir: Path = Depends(get_user_dir),
+) -> dict[str, Any]:
     """Upload an Apple Health export.zip (or export.xml) and reparse."""
     if not file.filename:
         raise HTTPException(400, "missing filename")
@@ -85,7 +95,7 @@ async def ingest(file: UploadFile = File(...)) -> dict[str, Any]:
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    stats = parse_export(dest, PARQUET_DIR)
+    stats = parse_export(dest, user_dir)
     return {
         "received": file.filename,
         "size_mb": round(dest.stat().st_size / 1e6, 2),
@@ -97,50 +107,50 @@ async def ingest(file: UploadFile = File(...)) -> dict[str, Any]:
 
 
 @app.get("/metrics/hrv")
-def metrics_hrv(days: int = 90) -> list[dict[str, Any]]:
-    return _store().daily_hrv(days)
+def metrics_hrv(days: int = 90, store: HealthStore = Depends(get_store)) -> list[dict[str, Any]]:
+    return store.daily_hrv(days)
 
 
 @app.get("/metrics/rhr")
-def metrics_rhr(days: int = 90) -> list[dict[str, Any]]:
-    return _store().daily_resting_hr(days)
+def metrics_rhr(days: int = 90, store: HealthStore = Depends(get_store)) -> list[dict[str, Any]]:
+    return store.daily_resting_hr(days)
 
 
 @app.get("/metrics/sleep")
-def metrics_sleep(days: int = 90) -> list[dict[str, Any]]:
-    return _store().daily_sleep(days)
+def metrics_sleep(days: int = 90, store: HealthStore = Depends(get_store)) -> list[dict[str, Any]]:
+    return store.daily_sleep(days)
 
 
 @app.get("/metrics/strain")
-def metrics_strain(days: int = 90) -> list[dict[str, Any]]:
-    return _store().daily_strain(days)
+def metrics_strain(days: int = 90, store: HealthStore = Depends(get_store)) -> list[dict[str, Any]]:
+    return store.daily_strain(days)
 
 
 @app.get("/metrics/rings")
-def metrics_rings(days: int = 90) -> list[dict[str, Any]]:
+def metrics_rings(days: int = 90, store: HealthStore = Depends(get_store)) -> list[dict[str, Any]]:
     """Fitness app Activity rings (Move/Exercise/Stand) per day."""
-    return _store().daily_rings(days)
+    return store.daily_rings(days)
 
 
 @app.get("/workouts")
-def workouts(days: int = 90) -> list[dict[str, Any]]:
+def workouts(days: int = 90, store: HealthStore = Depends(get_store)) -> list[dict[str, Any]]:
     """Individual workout sessions with HR / distance / kcal."""
-    return _store().workouts(days)
+    return store.workouts(days)
 
 
 @app.get("/recovery")
-def recovery(days: int = 60) -> list[dict[str, Any]]:
-    return compute_recovery_series(_store(), days)
+def recovery(days: int = 60, store: HealthStore = Depends(get_store)) -> list[dict[str, Any]]:
+    return compute_recovery_series(store, days)
 
 
 @app.get("/analytics/illness")
-def analytics_illness(days: int = 365 * 6) -> dict[str, Any]:
-    return detect_episodes(_store(), days)
+def analytics_illness(days: int = 365 * 6, store: HealthStore = Depends(get_store)) -> dict[str, Any]:
+    return detect_episodes(store, days)
 
 
 @app.get("/analytics/timeline")
-def analytics_timeline() -> dict[str, Any]:
-    tl = Timeline(PARQUET_DIR)
+def analytics_timeline(user_dir: Path = Depends(get_user_dir)) -> dict[str, Any]:
+    tl = Timeline(user_dir)
     return {
         "monthly": tl.monthly(),
         "yearly": tl.yearly_summary(),
@@ -149,28 +159,28 @@ def analytics_timeline() -> dict[str, Any]:
 
 
 @app.get("/analytics/admissions")
-def analytics_admissions() -> list[dict[str, Any]]:
-    return detect_admissions_dict(PARQUET_DIR, min_gap_days=1, max_gap_days=14)
+def analytics_admissions(user_dir: Path = Depends(get_user_dir)) -> list[dict[str, Any]]:
+    return detect_admissions_dict(user_dir, min_gap_days=1, max_gap_days=14)
 
 
 @app.get("/analytics/drift")
-def analytics_drift() -> list[dict[str, Any]]:
-    return detect_drift_dict(PARQUET_DIR)
+def analytics_drift(user_dir: Path = Depends(get_user_dir)) -> list[dict[str, Any]]:
+    return detect_drift_dict(user_dir)
 
 
 @app.get("/analytics/timeline_unified")
-def analytics_timeline_unified() -> list[dict[str, Any]]:
-    return build_unified_timeline(PARQUET_DIR)
+def analytics_timeline_unified(user_dir: Path = Depends(get_user_dir)) -> list[dict[str, Any]]:
+    return build_unified_timeline(user_dir)
 
 
 @app.get("/daily_status")
-def daily_status_endpoint(days: int = 35) -> dict[str, Any]:
-    return daily_status(PARQUET_DIR, days)
+def daily_status_endpoint(days: int = 35, user_dir: Path = Depends(get_user_dir)) -> dict[str, Any]:
+    return daily_status(user_dir, days)
 
 
 @app.get("/analytics/zones")
-def analytics_zones(days: int = 365 * 6) -> dict[str, Any]:
-    za = ZoneAnalyzer(PARQUET_DIR)
+def analytics_zones(days: int = 365 * 6, user_dir: Path = Depends(get_user_dir)) -> dict[str, Any]:
+    za = ZoneAnalyzer(user_dir)
     return {
         "max_hr": za.estimate_max_hr(),
         "by_sport": za.zones_by_sport(days),
@@ -198,58 +208,65 @@ def journal_entries(days: int = 90) -> list[dict[str, Any]]:
 
 
 @app.get("/journal/insights")
-def journal_insights() -> list[dict[str, Any]]:
-    return compute_insights(PARQUET_DIR)
+def journal_insights(user_dir: Path = Depends(get_user_dir)) -> list[dict[str, Any]]:
+    return compute_insights(user_dir)
 
 
 @app.get("/insights/auto")
-def auto_insights_endpoint() -> list[dict[str, Any]]:
-    return auto_insights(PARQUET_DIR)
+def auto_insights_endpoint(user_dir: Path = Depends(get_user_dir)) -> list[dict[str, Any]]:
+    return auto_insights(user_dir)
 
 
 @app.post("/sync")
-def sync_data(body: dict[str, Any]) -> dict[str, Any]:
+def sync_data(body: dict[str, Any], user_dir: Path = Depends(get_user_dir)) -> dict[str, Any]:
     """Receive incremental health data from Shortcuts / auto-export app."""
-    counts = receive_sync(PARQUET_DIR, body)
+    counts = receive_sync(user_dir, body)
     return {"status": "ok", "rows_added": counts}
 
 
 @app.post("/sync/shortcut")
-async def sync_shortcut(request: Request) -> dict[str, Any]:
+async def sync_shortcut(
+    request: Request,
+    user_dir: Path = Depends(get_user_dir),
+    x_user_id: str | None = Header(default=None),
+) -> dict[str, Any]:
     """Receive plain-text pipe-delimited data from Apple Shortcuts.
     Much easier to build in Shortcuts than JSON."""
     body = await request.body()
     text = body.decode("utf-8")
-    user_id = request.headers.get("X-User-Id", "default")
-    return sync_from_shortcut(PARQUET_DIR, text, user_id)
+    user_id = (x_user_id or "default").strip() or "default"
+    return sync_from_shortcut(user_dir, text, user_id)
 
 
 @app.get("/narrate")
-def narrate(day: str | None = None) -> dict[str, Any]:
+def narrate(day: str | None = None, user_dir: Path = Depends(get_user_dir)) -> dict[str, Any]:
     """Personalized daily assessment from smart narrator."""
-    return narrate_day(PARQUET_DIR, day)
+    return narrate_day(user_dir, day)
 
 
 @app.get("/today")
-def today_endpoint(date: str | None = None) -> dict[str, Any]:
+def today_endpoint(date: str | None = None, user_dir: Path = Depends(get_user_dir)) -> dict[str, Any]:
     """Unified daily dashboard — readiness, strain, recovery, sleep, tip."""
-    return get_today(PARQUET_DIR, target_date=date)
+    return get_today(user_dir, target_date=date)
 
 
 @app.get("/calendar")
-def calendar_endpoint(year: int | None = None, month: int | None = None) -> dict[str, Any]:
+def calendar_endpoint(
+    year: int | None = None,
+    month: int | None = None,
+    user_dir: Path = Depends(get_user_dir),
+) -> dict[str, Any]:
     """Score summary for calendar view — one month at a time."""
     from .readiness import get_calendar_month
     from datetime import date
     y = year or date.today().year
     m = month or date.today().month
-    return get_calendar_month(PARQUET_DIR, y, m)
+    return get_calendar_month(user_dir, y, m)
 
 
 @app.get("/overview")
-def overview() -> dict[str, Any]:
+def overview(store: HealthStore = Depends(get_store)) -> dict[str, Any]:
     """One-shot dashboard payload: latest recovery + snapshot + 30d series."""
-    store = _store()
     series = compute_recovery_series(store, 30)
     latest = series[-1] if series else None
     return {
