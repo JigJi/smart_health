@@ -112,90 +112,100 @@ def narrate_today(data: dict[str, Any]) -> str | None:
     else:
         sleep_text = "NO_SLEEP_DATA"
 
-    # Build data lines — only facts, no day-of-week
+    # Build data lines — semantic labels (short), let LLM compose freely
     data_lines = []
 
-    # Readiness level
+    # Readiness level (semantic label, not pre-written prose)
     readiness = data.get('readiness', 50)
     if readiness >= 70:
-        data_lines.append("- ร่างกายพร้อมเต็มที่")
+        readiness_label = "พร้อมเต็มที่"
     elif readiness >= 50:
-        data_lines.append("- ร่างกายอยู่ในเกณฑ์ปกติ")
+        readiness_label = "ปกติ"
     elif readiness >= 35:
-        data_lines.append("- ร่างกายยังไม่ค่อยพร้อม")
+        readiness_label = "ยังไม่เต็มที่"
     else:
-        data_lines.append("- ร่างกายล้ามาก")
+        readiness_label = "ล้ามาก"
+    data_lines.append(f"ความพร้อมของร่างกาย: {readiness_label}")
 
     # Sleep
     if sleep_text != "NO_SLEEP_DATA":
-        data_lines.append(f"- {sleep_text}")
+        data_lines.append(f"การนอน: {sleep_text}")
 
     # Workouts
     if wk_text:
-        data_lines.append(f"- ออกกำลังกาย: {wk_text}")
+        data_lines.append(f"การออกกำลังกาย: {wk_text}")
 
     # Streak
     if signals.get('streak', 0) >= 3:
-        data_lines.append("- ยิมติดกันมาหลายวัน")
+        data_lines.append("สถิติ: ยิมติดกันหลายวัน")
 
-    # HRV/RHR — be specific about each
+    # HRV/RHR — semantic status labels
     hrv_s = signals.get('hrv', {}).get('status', 'no_data')
     rhr_s = signals.get('rhr', {}).get('status', 'no_data')
     if hrv_s != 'no_data' and rhr_s != 'no_data':
         if hrv_s == 'good' and rhr_s == 'good':
-            data_lines.append("- หัวใจเต้นนิ่งกว่าปกติ ร่างกายฟื้นตัวดี")
+            heart_label = "ฟื้นตัวดีมาก (หัวใจเต้นนิ่ง, ชีพจรต่ำ)"
         elif hrv_s == 'bad' and rhr_s == 'bad':
-            data_lines.append("- หัวใจเต้นเร็วกว่าปกติมาก ร่างกายยังไม่ฟื้นตัว สัญญาณไม่ดี")
+            heart_label = "ยังไม่ฟื้นตัว สัญญาณแย่ (หัวใจเต้นเร็วและไม่นิ่ง)"
         elif rhr_s == 'bad':
-            data_lines.append("- หัวใจเต้นเร็วกว่าปกติมาก")
+            heart_label = "ชีพจรสูงกว่าปกติมาก"
         elif hrv_s == 'bad':
-            data_lines.append("- ความยืดหยุ่นของหัวใจต่ำกว่าปกติมาก")
+            heart_label = "ความยืดหยุ่นของหัวใจต่ำกว่าปกติมาก"
         elif hrv_s == 'warning' or rhr_s == 'warning':
-            data_lines.append("- สัญญาณชีพต่ำกว่าปกติเล็กน้อย")
+            heart_label = "สัญญาณชีพต่ำกว่าปกติเล็กน้อย"
         else:
-            data_lines.append("- การทำงานของหัวใจปกติดี")
+            heart_label = "ปกติ"
+        data_lines.append(f"หัวใจ: {heart_label}")
     elif hrv_s != 'no_data':
         if hrv_s == 'good':
-            data_lines.append("- ความยืดหยุ่นของหัวใจดี")
+            heart_label = "ความยืดหยุ่นของหัวใจดี"
         elif hrv_s == 'bad':
-            data_lines.append("- ความยืดหยุ่นของหัวใจต่ำกว่าปกติมาก")
+            heart_label = "ความยืดหยุ่นของหัวใจต่ำกว่าปกติมาก"
         elif hrv_s == 'warning':
-            data_lines.append("- ความยืดหยุ่นของหัวใจต่ำกว่าปกติเล็กน้อย")
+            heart_label = "ความยืดหยุ่นของหัวใจต่ำเล็กน้อย"
+        data_lines.append(f"หัวใจ: {heart_label}")
 
-    data_block = '\n'.join(data_lines)
-
-    # If only readiness line (no other data at all), use template
+    # If only readiness line (no other data at all), use rotated fallback
     if len(data_lines) <= 1:
-        if readiness >= 50:
-            fallback = "ร่างกายอยู่ในเกณฑ์ปกติ ไม่มีสัญญาณผิดปกติ วันนี้ไม่ได้ใส่นาฬิกาหรือไม่มีข้อมูลจากอุปกรณ์"
-        else:
-            fallback = "ร่างกายยังไม่ค่อยพร้อม อาจเป็นช่วงที่กำลังปรับตัวหรือฟื้นตัวจากกิจกรรมก่อนหน้า วันนี้ไม่มีข้อมูลจากอุปกรณ์มากนัก"
+        import random
+        FALLBACK_NORMAL = [
+            "วันนี้สภาพโดยรวมปกติ ไม่มีสัญญาณผิดปกติ เป็นวันที่ข้อมูลจากอุปกรณ์มีไม่ครบ",
+            "อยู่ในเกณฑ์ปกติ ข้อมูลจากนาฬิกาวันนี้จำกัด อาจไม่ได้ใส่ตลอดวัน",
+            "ไม่มีสัญญาณน่ากังวลจากข้อมูลเท่าที่มี วันนี้อุปกรณ์เก็บข้อมูลได้น้อย",
+            "สภาพโดยรวมไม่มีอะไรน่าเป็นห่วง เป็นวันที่ใส่นาฬิกาน้อยหรือไม่ได้ใส่",
+        ]
+        FALLBACK_LOW = [
+            "พลังงานยังไม่เต็ม น่าจะกำลังปรับตัวจากวันก่อน ข้อมูลจากอุปกรณ์วันนี้ไม่ครบ",
+            "ความพร้อมวันนี้น้อยกว่าปกติ อาจเป็นช่วงฟื้นตัว ข้อมูลอุปกรณ์มีจำกัด",
+            "ยังไม่ค่อยพร้อมเต็มที่ เป็นวันที่อุปกรณ์เก็บข้อมูลได้ไม่มาก",
+        ]
+        pool = FALLBACK_NORMAL if readiness >= 50 else FALLBACK_LOW
+        fallback = random.choice(pool)
         if is_past:
             _save_file_cache(target, fallback)
         return fallback
 
-    # Build structured prompt — one sentence per data point
-    sentences = []
-    for line in data_lines:
-        sentences.append(line.lstrip('- '))
-
-    prompt = f"""แปลงข้อมูลสุขภาพด้านล่างเป็นข้อความภาษาไทย ย่อหน้าเดียว เขียนให้ลื่นเป็นธรรมชาติ
-
-กฎ:
-- ข้อมูลแต่ละข้อ = 1 ประโยค ห้ามซ้ำความ ห้ามขยายเกินข้อมูลที่ให้
-- เชื่อมประโยคให้อ่านลื่น ไม่ใช่แค่แปลทีละบรรทัด
-- ห้ามใส่ตัวเลข ห้ามให้คำแนะนำ ห้ามใช้ "เธอ"
-- ห้ามเพิ่มข้อมูลที่ไม่ได้ให้ ห้ามเพิ่มอาการ ห้ามเพิ่มความรู้สึก
-- ห้ามจบด้วย filler เช่น "ถือว่าเป็นวันที่ดี"
+    # Build prompt — give LLM freedom to compose, keep guardrails strict
+    prompt = f"""เขียนสรุปสุขภาพวันนี้เป็นภาษาไทย 1 ย่อหน้า (2–4 ประโยค) สั้นกระชับ อ่านลื่นเป็นธรรมชาติ
 
 ข้อมูล:
-{chr(10).join(f'{i+1}. {s}' for i, s in enumerate(sentences))}"""
+{chr(10).join(f'- {s}' for s in data_lines)}
+
+กฎเข้ม (ห้ามฝ่าฝืน):
+1. **คำขึ้นต้นต้องหลากหลาย** — ผู้อ่านเห็นข้อความนี้วันละหลายรอบ ห้ามขึ้นต้นจำเจ อย่าเริ่มด้วย "ร่างกาย..." ทุกครั้ง ลองสลับเริ่มจากข้อมูลที่เด่นสุดของวัน (การนอน / การออกกำลังกาย / หัวใจ / ความรู้สึกโดยรวม) หรือใช้คำเปิดแบบอื่น เช่น "วันนี้...", "ช่วงเช้า...", "ตื่นมา...", "แม้...", "ถึงแม้..."
+2. ห้ามใส่ตัวเลขหรือหน่วย (ms, bpm, ก้าว, ชั่วโมง)
+3. ห้ามใช้คำว่า "เธอ"
+4. **ห้ามแนะนำอะไรทั้งสิ้น** — ห้ามบอกว่าทำอะไรได้/ไม่ได้, ควร/ไม่ควร, เหมาะ/ไม่เหมาะ ห้ามใช้คำต่อไปนี้เด็ดขาด: "ควร", "ไม่ควร", "สามารถ...ได้", "ทำ...ได้ตามปกติ", "เหมาะแก่", "น่าจะ...ดี", "พัก", "นอน", "หยุด", "ลดความหนัก", "ระมัดระวัง", "ลองดู", "แนะนำ"
+5. ห้ามเพิ่มข้อมูล อาการ หรือความรู้สึก ที่ไม่ได้อยู่ใน input
+6. ห้ามจบด้วย filler เช่น "ถือว่าเป็นวันที่ดี", "ดูแลตัวเองนะ"
+7. พูดครบทุก data point ที่ให้ แต่ไม่จำเป็นต้องเรียงตามลำดับ — เรียงใหม่ให้อ่านลื่น
+8. **เขียนแค่ fact ล้วนๆ** — เหมือนรายงานสรุปสุขภาพ ไม่ใช่ที่ปรึกษา ไม่มีความเห็น ไม่มีคำแนะนำ"""
 
     body = json.dumps({
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 250,
-        "temperature": 0.7,
+        "temperature": 0.9,
     }).encode("utf-8")
 
     req = urllib.request.Request(

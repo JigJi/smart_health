@@ -62,3 +62,11 @@ html, body {
 .animate-delay-3 { animation-delay: 0.3s; opacity: 0; }
 .animate-delay-4 { animation-delay: 0.4s; opacity: 0; }
 .animate-delay-5 { animation-delay: 0.5s; opacity: 0; }
+
+/* iOS WebView tap responsiveness — kill tap delay & selection glitches */
+button, a, [role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}

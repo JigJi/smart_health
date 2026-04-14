@@ -229,8 +229,8 @@ export default function Home() {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const loadDay = (date?: string) => {
-    setLoading(true);
+  const loadDay = (date?: string, silent = false) => {
+    if (!silent) setLoading(true);
     api.today(date).then(d => { setData(d); setLoading(false); }).catch(() => { setError(true); setLoading(false); });
   };
 
@@ -257,6 +257,14 @@ export default function Home() {
     loadCalendar(calYear, calMonth);
   }, []);
 
+  // Expose silent refresh for native shell (iOS WebView) to call after sync
+  useEffect(() => {
+    (window as any).__refreshData = () => {
+      loadDay(selectedDate, true);           // silent — no "กำลังโหลด..." overlay
+      loadCalendar(calYear, calMonth);
+    };
+  });
+
   if (error) return (
     <main className="min-h-screen flex items-center justify-center bg-[#141414]">
       <p className="text-white/40 text-sm">ยังไม่ได้เชื่อมต่อ backend</p>
@@ -265,7 +273,7 @@ export default function Home() {
 
   if (!data) return (
     <main className="min-h-screen flex items-center justify-center bg-[#141414]">
-      <div className="text-white/20 text-sm">กำลังโหลด...</div>
+      <div className="text-white/40 text-lg">กำลังโหลด...</div>
     </main>
   );
 
@@ -280,8 +288,8 @@ export default function Home() {
     }}>
       {/* Loading overlay */}
       {loading && (
-        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="text-white/70 text-sm">กำลังโหลด...</div>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="text-white/80 text-2xl">กำลังโหลด...</div>
         </div>
       )}
 
@@ -468,7 +476,7 @@ export default function Home() {
           <MonitorCard icon={<IconWave />} label="HRV" value={signals.hrv.value} unit="ms"
             status={signals.hrv.status} baseline={signals.hrv.baseline} />
           <MonitorCard icon={<IconLung />} label="RR" value={data.vitals?.rr ?? null} unit="rpm"
-            status={data.vitals?.rr ? (data.vitals.rr >= 12 && data.vitals.rr <= 20 ? 'good' : 'warning') : 'no_data'} />
+            status={data.vitals?.rr ? (data.vitals.rr >= 10 && data.vitals.rr <= 20 ? 'good' : 'warning') : 'no_data'} />
           <MonitorCard icon={<IconO2 />} label="SpO2" value={data.vitals?.spo2 ?? null} unit="%"
             status={data.vitals?.spo2 ? (data.vitals.spo2 >= 95 ? 'good' : data.vitals.spo2 >= 90 ? 'warning' : 'bad') : 'no_data'} />
           <MonitorCard icon={<IconMoon />} label="การนอน" value={signals.sleep.hours} unit="ชม."

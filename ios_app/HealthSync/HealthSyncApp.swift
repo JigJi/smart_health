@@ -10,14 +10,31 @@ import SwiftUI
 @main
 struct HealthSyncApp: App {
     @StateObject private var healthKit = HealthKitManager()
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("hasOnboarded") private var hasOnboarded = false
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(healthKit)
-                .onAppear {
-                    healthKit.requestAuthorization()
+            Group {
+                if hasOnboarded {
+                    ContentView()
+                        .environmentObject(healthKit)
+                        .onAppear {
+                            // Silent re-check — iOS will only prompt if readTypes grew
+                            healthKit.requestAuthorization()
+                        }
+                } else {
+                    OnboardingView {
+                        healthKit.requestAuthorization()
+                        hasOnboarded = true
+                    }
                 }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active && healthKit.isAuthorized {
+                    healthKit.syncNow()
+                }
+            }
         }
     }
 }

@@ -34,6 +34,9 @@ def parse_shortcut_text(text: str) -> dict[str, Any]:
         "workouts": [],
         "steps": [],
         "active_energy": [],
+        "spo2": [],
+        "respiratory_rate": [],
+        "sleep": [],
     }
 
     for line in text.strip().split("\n"):
@@ -74,15 +77,30 @@ def parse_shortcut_text(text: str) -> dict[str, Any]:
             payload["active_energy"].append({
                 "time": parts[1], "value": float(parts[2])
             })
+        elif kind == "SPO2" and len(parts) >= 3:
+            # iOS sends percent as 0-1 (e.g. 0.97) — keep raw fractional form
+            payload["spo2"].append({
+                "time": parts[1], "value": float(parts[2])
+            })
+        elif kind == "RR" and len(parts) >= 3:
+            payload["respiratory_rate"].append({
+                "time": parts[1], "value": float(parts[2])
+            })
+        elif kind == "SLEEP" and len(parts) >= 4:
+            payload["sleep"].append({
+                "start": parts[1],
+                "end": parts[2],
+                "stage": parts[3],
+            })
 
     # Remove empty lists
     return {k: v for k, v in payload.items() if v}
 
 
 def sync_from_shortcut(parquet_dir: str | Path, text: str, user_id: str = "default") -> dict[str, Any]:
-    """Parse shortcut text and sync to parquet."""
-    user_dir = Path(parquet_dir)
-    # For multi-user: user_dir = Path(parquet_dir) / "users" / user_id
+    """Parse shortcut text and sync to per-user parquet directory."""
+    user_dir = Path(parquet_dir) / "users" / user_id
+    user_dir.mkdir(parents=True, exist_ok=True)
     payload = parse_shortcut_text(text)
     counts = receive_sync(user_dir, payload)
     total = sum(counts.values())

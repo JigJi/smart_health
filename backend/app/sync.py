@@ -61,6 +61,11 @@ METRIC_MAP = {
         "columns": {"time": "start", "value": "value"},
         "extra": {"unit": "kcal", "source": "sync"},
     },
+    "respiratory_rate": {
+        "file": "respiratory_rate.parquet",
+        "columns": {"time": "start", "value": "value"},
+        "extra": {"unit": "count/min", "source": "sync"},
+    },
 }
 
 
@@ -111,6 +116,36 @@ def receive_sync(parquet_dir: str | Path, payload: dict[str, Any]) -> dict[str, 
         if rows:
             _append_parquet(parquet_dir / config["file"], rows)
             result[field] = len(rows)
+
+    # Process sleep separately (different schema: start/end/stage)
+    sleep_samples = payload.get("sleep", [])
+    if sleep_samples:
+        rows = []
+        for s in sleep_samples:
+            start = s.get("start") or s.get("time")
+            end = s.get("end") or start
+            stage = s.get("stage", "HKCategoryValueSleepAnalysisAsleepUnspecified")
+            if not start:
+                continue
+            rows.append({
+                "start": _parse_time(str(start)),
+                "end": _parse_time(str(end)),
+                "stage": stage,
+                "source": "sync",
+            })
+        if rows:
+            path = parquet_dir / "sleep.parquet"
+            new_df = pd.DataFrame(rows)
+            if path.exists():
+                existing = pd.read_parquet(path)
+                combined = pd.concat([existing, new_df], ignore_index=True)
+                combined = combined.drop_duplicates(
+                    subset=["start", "end", "stage"], keep="first"
+                )
+                combined.to_parquet(path, index=False)
+            else:
+                new_df.to_parquet(path, index=False)
+            result["sleep"] = len(rows)
 
     # Process workouts separately (different schema)
     workouts = payload.get("workouts", [])

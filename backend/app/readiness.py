@@ -28,14 +28,20 @@ def _query(parquet_dir: Path, sql: str) -> list:
 
 
 def _get_today_hrv(parquet_dir: Path, target: date | None = None) -> tuple[float | None, float | None]:
-    """Return (today_hrv, baseline_hrv)."""
+    """Return (overnight_hrv, baseline_hrv).
+
+    Clinical standard (Whoop/Oura/Bevel): overnight HRV only — filter to
+    early morning hours (before 10am) when Apple Watch logs most resting
+    readings post-sleep. Daytime spikes (stress/walking/coffee) are excluded.
+    """
     p = parquet_dir / "hrv_sdnn.parquet"
     if not p.exists():
         return None, None
     rows = _query(parquet_dir, f"""
-        SELECT CAST(start AS DATE) AS d, median(value) AS v
+        SELECT CAST(start AS DATE) AS d, avg(value) AS v
         FROM read_parquet('{p.as_posix()}')
         WHERE CAST(start AS DATE) >= current_date - INTERVAL 90 DAY
+          AND EXTRACT(hour FROM start) < 10
         GROUP BY 1 ORDER BY 1
     """)
     if not rows:
@@ -575,25 +581,26 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         prev_steps, streak, sleep_hours, dow,
     )
 
-    # Post-compute adjustments (only for today, not past dates)
-    is_today = not target_date or target_date == str(date.today())
+    # Post-compute adjustments — apply for ALL days (today & past) so that
+    # a day's readiness is an immutable fact of that day, not affected by
+    # when it's being viewed. Late bedtime + "already worked out" are real
+    # factors that were true on that day and should persist in history.
     extra_reasons = []
 
-    if is_today:
-        # Late bedtime penalty
-        bedtime = sleep_data.get("bedtime")
-        if bedtime:
-            hour = int(bedtime.split(":")[0])
-            if hour >= 1 and hour <= 5:
-                score -= 10
-                extra_reasons.append(f"นอนดึก ({bedtime} น.)")
-            elif hour == 0 and int(bedtime.split(":")[1]) >= 30:
-                score -= 5
-
-        # Already worked out today — reduce readiness
-        if strain_data.get("workouts"):
+    # Late bedtime penalty
+    bedtime = sleep_data.get("bedtime")
+    if bedtime:
+        hour = int(bedtime.split(":")[0])
+        if hour >= 1 and hour <= 5:
             score -= 10
-            extra_reasons.append("ออกกำลังกายไปแล้ววันนี้")
+            extra_reasons.append(f"นอนดึก ({bedtime} น.)")
+        elif hour == 0 and int(bedtime.split(":")[1]) >= 30:
+            score -= 5
+
+    # Already worked out that day — reduce readiness
+    if strain_data.get("workouts"):
+        score -= 10
+        extra_reasons.append("ออกกำลังกายไปแล้ว")
 
     if extra_reasons:
         reason = reason + " · " + " · ".join(extra_reasons) if reason != "ร่างกายปกติดี" else " · ".join(extra_reasons)
@@ -680,14 +687,15 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         "tip": tip,
     }
 
-    # SpO2 + Respiratory Rate (latest today)
+    # SpO2 + Respiratory Rate — average across today's samples
+    # (clinical standard; "latest" is misleading because one stray 100% reading
+    # would show 100% even if average was 97%)
     spo2_val = None
     p = parquet_dir / "spo2.parquet"
     if p.exists():
         rows = _query(parquet_dir, f"""
-            SELECT value FROM read_parquet('{p.as_posix()}')
+            SELECT avg(value) FROM read_parquet('{p.as_posix()}')
             WHERE CAST(start AS DATE) = current_date
-            ORDER BY start DESC LIMIT 1
         """)
         if rows and rows[0][0]:
             spo2_val = round(float(rows[0][0]) * 100, 1)  # stored as 0-1
@@ -696,9 +704,8 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
     p = parquet_dir / "respiratory_rate.parquet"
     if p.exists():
         rows = _query(parquet_dir, f"""
-            SELECT value FROM read_parquet('{p.as_posix()}')
+            SELECT avg(value) FROM read_parquet('{p.as_posix()}')
             WHERE CAST(start AS DATE) = current_date
-            ORDER BY start DESC LIMIT 1
         """)
         if rows and rows[0][0]:
             rr_val = round(float(rows[0][0]), 1)
@@ -788,18 +795,21 @@ def get_calendar_month(parquet_dir: str | Path, year: int, month: int) -> dict[s
         """)
         steps_by_day = {r[0]: float(r[1]) for r in rows if r[1]}
 
+    bedtime_by_day: dict = {}
     if sleep_p.exists():
         rows = _cal_query(f"""
             SELECT CAST("end" AS DATE) AS d,
                    SUM(CASE WHEN stage LIKE '%AsleepCore%' OR stage LIKE '%AsleepDeep%'
                             OR stage LIKE '%AsleepREM%' THEN
-                       EXTRACT(EPOCH FROM ("end" - start)) / 3600.0 ELSE 0 END) AS hours
+                       EXTRACT(EPOCH FROM ("end" - start)) / 3600.0 ELSE 0 END) AS hours,
+                   min(start) AS bedtime
             FROM read_parquet('{sleep_p.as_posix()}')
             WHERE CAST("end" AS DATE) >= DATE '{str(first_day)}'
               AND CAST("end" AS DATE) <= DATE '{end_str}'
             GROUP BY 1
         """)
         sleep_by_day = {r[0]: float(r[1]) for r in rows if r[1] and float(r[1]) > 0}
+        bedtime_by_day = {r[0]: r[2] for r in rows if r[2]}
 
     if workouts_p.exists():
         rows = _cal_query(f"""
@@ -839,6 +849,28 @@ def get_calendar_month(parquet_dir: str | Path, year: int, month: int) -> dict[s
             hrv_val, hrv_base, rhr_val, rhr_base,
             prev_steps, streak, sleep_hours, d.weekday(),
         )
+
+        # Apply /today's post-compute penalties for every day so calendar
+        # matches dashboard readiness — day's readiness is immutable history
+        bt = bedtime_by_day.get(d)
+        if bt:
+            h, m = bt.hour, bt.minute
+            if 1 <= h <= 5:
+                score -= 10
+            elif h == 0 and m >= 30:
+                score -= 5
+
+        if d in workout_days:
+            score -= 10
+
+        # Clamp + recompute color (match /today thresholds)
+        score = max(0, min(100, score))
+        if score >= 50:
+            color = "green"
+        elif score >= 35:
+            color = "yellow"
+        else:
+            color = "red"
 
         results.append({
             "date": str(d),

@@ -10,7 +10,7 @@ import Foundation
 class APIClient {
     // TODO: เปลี่ยนเป็น URL จริงของ backend
     // ตอน dev ใช้ localhost ถ้ารัน backend บน Mac เครื่องเดียวกัน
-    static let baseURL = "http://172.20.10.2:8401"
+    static let baseURL = "http://192.168.1.38:8401"
 
     func postSync(payload: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: "\(Self.baseURL)/sync/shortcut") else {
