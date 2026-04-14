@@ -473,44 +473,44 @@ export default function Home() {
         <div className="mx-5 mb-4 animate-fade-up animate-delay-3">
           <button
             onClick={() => setShowTips(!showTips)}
-            className="w-full rounded-[16px] px-4 py-3 flex items-center justify-between"
+            className="w-full rounded-[18px] px-5 py-4 flex items-center justify-between"
             style={{
               background: 'rgba(10,132,255,0.10)',
               border: '1px solid rgba(10,132,255,0.25)',
               boxShadow: '0 4px 16px rgba(10,132,255,0.08)',
             }}
           >
-            <div className="flex items-center gap-2">
-              <span className="text-[13px] font-medium" style={{ color: '#5AC8FA' }}>แนะนำสำหรับวันนี้</span>
-              <span className="text-[11px] px-1.5 py-0.5 rounded-full tabular-nums" style={{
+            <div className="flex items-center gap-2.5">
+              <span className="text-[15px] font-semibold" style={{ color: '#5AC8FA' }}>แนะนำสำหรับวันนี้</span>
+              <span className="text-[12px] px-2 py-0.5 rounded-full tabular-nums font-medium" style={{
                 background: 'rgba(10,132,255,0.2)',
                 color: '#5AC8FA',
               }}>
                 {data.tips.length}
               </span>
             </div>
-            <span className="text-sm" style={{ color: 'rgba(90,200,250,0.5)' }}>{showTips ? '▲' : '▼'}</span>
+            <span className="text-base" style={{ color: 'rgba(90,200,250,0.5)' }}>{showTips ? '▲' : '▼'}</span>
           </button>
 
           {showTips && (
-            <div className="mt-2 space-y-2 animate-fade-up">
+            <div className="mt-2.5 space-y-2.5 animate-fade-up">
               {data.tips.map((tip, i) => (
-                <div key={i} className="rounded-[14px] p-3.5" style={{
+                <div key={i} className="rounded-[16px] p-4" style={{
                   background: 'rgba(10,132,255,0.06)',
                   border: '1px solid rgba(10,132,255,0.15)',
                 }}>
-                  <div className="text-[13px] font-medium mb-2" style={{ color: '#7FD4FF' }}>{tip.headline}</div>
-                  <ul className="space-y-1.5">
+                  <div className="text-[15px] font-semibold mb-2.5 leading-[1.5]" style={{ color: '#7FD4FF' }}>{tip.headline}</div>
+                  <ul className="space-y-2">
                     {tip.options.map((opt, j) => (
-                      <li key={j} className="text-[13px] leading-[1.6] flex gap-2" style={{ color: 'rgba(255,255,255,0.72)' }}>
-                        <span className="shrink-0" style={{ color: '#5AC8FA' }}>•</span>
+                      <li key={j} className="text-[14px] leading-[1.65] flex gap-2.5" style={{ color: 'rgba(255,255,255,0.78)' }}>
+                        <span className="shrink-0 mt-px" style={{ color: '#5AC8FA' }}>•</span>
                         <span>{opt}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
               ))}
-              <div className="text-[11px] text-center pt-1 pb-0.5" style={{ color: 'rgba(90,200,250,0.4)' }}>
+              <div className="text-[12px] text-center pt-1.5 pb-1" style={{ color: 'rgba(90,200,250,0.45)' }}>
                 ผลการแนะนำมาจากการวิเคราะห์สิ่งที่คุณเคยทำในช่วงที่ผ่านมา
               </div>
             </div>
