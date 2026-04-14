@@ -11,10 +11,10 @@ struct ContentView: View {
     @EnvironmentObject var hk: HealthKitManager
     @Environment(\.scenePhase) private var scenePhase
 
-    // TODO: เปลี่ยนเป็น tunnel URL ตอน deploy
-    // uid query param lets the frontend forward X-User-Id to backend → data isolation per user
+    // Production: Tailscale Funnel → Windows server frontend (Next.js)
+    // uid query param lets the frontend forward X-User-Id to backend
     var dashboardURL: String {
-        "http://192.168.1.38:3400?uid=\(APIClient.userId())"
+        "https://voizely-backend.tailb8d083.ts.net:8443?uid=\(APIClient.userId())"
     }
 
     @State private var webReloadTrigger = 0

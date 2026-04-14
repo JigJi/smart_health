@@ -8,8 +8,9 @@
 import Foundation
 
 class APIClient {
-    // TODO: เปลี่ยนเป็น URL จริงของ backend (ตอน deploy → ใช้ Cloudflare tunnel URL)
-    static let baseURL = "http://192.168.1.38:8401"
+    // Production: Tailscale Funnel public HTTPS URL → Windows server backend
+    // (LAN dev fallback: http://192.168.1.38:8401)
+    static let baseURL = "https://voizely-backend.tailb8d083.ts.net:10000"
 
     /// UUID per install — generated once on first launch, persisted in UserDefaults.
     /// Ensures each user's data stays isolated on the server (multi-user support).
