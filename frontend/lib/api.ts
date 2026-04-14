@@ -91,7 +91,13 @@ export const api = {
   rhr: (days = 90) => j<any[]>(`/metrics/rhr?days=${days}`),
   recovery: (days = 30) => j<any[]>(`/recovery?days=${days}`),
   status: () => j<{ parquet_dir: string; files: Record<string, number> }>('/status'),
-  today: () => j<TodayData>('/api/today'),
+  today: (date?: string) => j<TodayData>(date ? `/api/today?date=${date}` : '/api/today'),
+  calendar: (year?: number, month?: number) => {
+    const params = new URLSearchParams();
+    if (year) params.set('year', String(year));
+    if (month) params.set('month', String(month));
+    return j<CalendarMonth>(params.toString() ? `/api/calendar?${params}` : '/api/calendar');
+  },
 };
 
 export type TodayData = {
@@ -132,4 +138,19 @@ export type TodayData = {
     pm25: number | null;
     pm25_label: string;
   };
+};
+
+export type CalendarDay = {
+  date: string;
+  score: number | null;
+  color: string;
+  has_workout: boolean;
+};
+
+export type CalendarMonth = {
+  year: number;
+  month: number;
+  month_th: string;
+  first_weekday: number;
+  days: CalendarDay[];
 };

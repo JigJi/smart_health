@@ -17,13 +17,17 @@ from .queries import HealthStore
 from .recovery import compute_recovery_series
 
 
+_target_date_override: str | None = None
+
 def _query(parquet_dir: Path, sql: str) -> list:
     con = duckdb.connect(":memory:")
     con.execute("SET TimeZone='Asia/Bangkok'")
+    if _target_date_override:
+        sql = sql.replace("current_date", f"DATE '{_target_date_override}'")
     return con.execute(sql).fetchall()
 
 
-def _get_today_hrv(parquet_dir: Path) -> tuple[float | None, float | None]:
+def _get_today_hrv(parquet_dir: Path, target: date | None = None) -> tuple[float | None, float | None]:
     """Return (today_hrv, baseline_hrv)."""
     p = parquet_dir / "hrv_sdnn.parquet"
     if not p.exists():
@@ -37,14 +41,14 @@ def _get_today_hrv(parquet_dir: Path) -> tuple[float | None, float | None]:
     if not rows:
         return None, None
     by_day = {r[0]: float(r[1]) for r in rows}
-    today = date.today()
-    today_val = by_day.get(today)
-    prior = [v for d, v in by_day.items() if d < today and (today - d).days <= 60]
+    d = target or date.today()
+    today_val = by_day.get(d)
+    prior = [v for dd, v in by_day.items() if dd < d and (d - dd).days <= 60]
     baseline = sum(prior) / len(prior) if len(prior) >= 7 else None
     return today_val, baseline
 
 
-def _get_today_rhr(parquet_dir: Path) -> tuple[float | None, float | None]:
+def _get_today_rhr(parquet_dir: Path, target: date | None = None) -> tuple[float | None, float | None]:
     """Return (today_rhr, baseline_rhr)."""
     p = parquet_dir / "resting_heart_rate.parquet"
     if not p.exists():
@@ -58,9 +62,9 @@ def _get_today_rhr(parquet_dir: Path) -> tuple[float | None, float | None]:
     if not rows:
         return None, None
     by_day = {r[0]: float(r[1]) for r in rows}
-    today = date.today()
-    today_val = by_day.get(today)
-    prior = [v for d, v in by_day.items() if d < today and (today - d).days <= 60]
+    d = target or date.today()
+    today_val = by_day.get(d)
+    prior = [v for dd, v in by_day.items() if dd < d and (d - dd).days <= 60]
     baseline = sum(prior) / len(prior) if len(prior) >= 7 else None
     return today_val, baseline
 
@@ -106,10 +110,14 @@ def _get_today_strain(parquet_dir: Path) -> dict[str, Any]:
     p = parquet_dir / "workouts.parquet"
     if p.exists():
         rows = _query(parquet_dir, f"""
-            SELECT type, duration_min, active_kcal, start
+            SELECT type,
+                   SUM(duration_min) AS dur,
+                   SUM(active_kcal) AS kcal,
+                   MIN(start) AS first_start
             FROM read_parquet('{p.as_posix()}')
             WHERE CAST(start AS DATE) = current_date
-            ORDER BY start DESC
+            GROUP BY type
+            ORDER BY first_start DESC
         """)
         for r in rows:
             wtype = r[0].replace("HKWorkoutActivityType", "") if r[0] else "Other"
@@ -538,15 +546,22 @@ def _build_natural_reason(data: dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
-def get_today(parquet_dir: str | Path) -> dict[str, Any]:
-    """Build the unified /today payload."""
+def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[str, Any]:
+    """Build the unified /today payload. If target_date given (YYYY-MM-DD), show that day."""
     parquet_dir = Path(parquet_dir)
-    today = date.today()
+    if target_date:
+        today = date.fromisoformat(target_date)
+    else:
+        today = date.today()
     dow = today.weekday()
 
+    # Set date override for SQL queries
+    global _target_date_override
+    _target_date_override = target_date
+
     # Gather signals
-    hrv_val, hrv_base = _get_today_hrv(parquet_dir)
-    rhr_val, rhr_base = _get_today_rhr(parquet_dir)
+    hrv_val, hrv_base = _get_today_hrv(parquet_dir, today)
+    rhr_val, rhr_base = _get_today_rhr(parquet_dir, today)
     prev_steps = _get_prev_steps(parquet_dir)
     streak = _get_gym_streak(parquet_dir)
     sleep_data = _get_sleep(parquet_dir)
@@ -560,23 +575,25 @@ def get_today(parquet_dir: str | Path) -> dict[str, Any]:
         prev_steps, streak, sleep_hours, dow,
     )
 
-    # Post-compute adjustments
+    # Post-compute adjustments (only for today, not past dates)
+    is_today = not target_date or target_date == str(date.today())
     extra_reasons = []
 
-    # Late bedtime penalty
-    bedtime = sleep_data.get("bedtime")
-    if bedtime:
-        hour = int(bedtime.split(":")[0])
-        if hour >= 1 and hour <= 5:  # slept between 1am-5am
-            score -= 10
-            extra_reasons.append(f"นอนดึก ({bedtime} น.)")
-        elif hour == 0 and int(bedtime.split(":")[1]) >= 30:
-            score -= 5
+    if is_today:
+        # Late bedtime penalty
+        bedtime = sleep_data.get("bedtime")
+        if bedtime:
+            hour = int(bedtime.split(":")[0])
+            if hour >= 1 and hour <= 5:
+                score -= 10
+                extra_reasons.append(f"นอนดึก ({bedtime} น.)")
+            elif hour == 0 and int(bedtime.split(":")[1]) >= 30:
+                score -= 5
 
-    # Already worked out today — reduce readiness
-    if strain_data.get("workouts"):
-        score -= 10
-        extra_reasons.append("ออกกำลังกายไปแล้ววันนี้")
+        # Already worked out today — reduce readiness
+        if strain_data.get("workouts"):
+            score -= 10
+            extra_reasons.append("ออกกำลังกายไปแล้ววันนี้")
 
     if extra_reasons:
         reason = reason + " · " + " · ".join(extra_reasons) if reason != "ร่างกายปกติดี" else " · ".join(extra_reasons)
@@ -597,10 +614,19 @@ def get_today(parquet_dir: str | Path) -> dict[str, Any]:
         label = "ควรพัก"
         color = "red"
 
-    # Recovery (reuse existing module)
-    store = HealthStore(parquet_dir)
-    recovery_series = compute_recovery_series(store, 7)
-    recovery_today = recovery_series[-1] if recovery_series else {}
+    # Recovery — calculate from same signals as readiness (HRV + RHR + Sleep only)
+    def _pct(val: float | None, base: float | None, invert: bool = False) -> int | None:
+        if val is None or base is None:
+            return None
+        diff = (val - base) / base if not invert else (base - val) / base
+        return max(0, min(100, round(50 + diff * 200)))
+
+    hrv_pct = _pct(hrv_val, hrv_base)
+    rhr_pct = _pct(rhr_val, rhr_base, invert=True)
+    sleep_pct = min(100, round((sleep_hours / 8) * 100)) if sleep_hours else None
+
+    recovery_parts = [p for p in [hrv_pct, rhr_pct, sleep_pct] if p is not None]
+    recovery_score = round(sum(recovery_parts) / len(recovery_parts)) if recovery_parts else None
 
     # Tip
     already_worked_out = len(strain_data.get("workouts", [])) > 0
@@ -646,10 +672,10 @@ def get_today(parquet_dir: str | Path) -> dict[str, Any]:
         },
         "strain": strain_data,
         "recovery": {
-            "score": recovery_today.get("recovery"),
-            "hrv_score": round(recovery_today["hrv_score"] * 100) if recovery_today.get("hrv_score") is not None else None,
-            "rhr_score": round(recovery_today["rhr_score"] * 100) if recovery_today.get("rhr_score") is not None else None,
-            "sleep_score": round(recovery_today["sleep_score"] * 100) if recovery_today.get("sleep_score") is not None else None,
+            "score": recovery_score,
+            "hrv_score": hrv_pct,
+            "rhr_score": rhr_pct,
+            "sleep_score": sleep_pct,
         },
         "tip": tip,
     }
@@ -690,5 +716,142 @@ def get_today(parquet_dir: str | Path) -> dict[str, Any]:
     narration = narrate_today(payload)
     if narration:
         payload["reason"] = narration
+    else:
+        # Fallback — strip numbers from template reason
+        import re
+        payload["reason"] = re.sub(r'\d+[\d,.]*\s*(?:ms|bpm|ก้าว|ชม\.|%)', '', payload["reason"])
+        payload["reason"] = re.sub(r'\(\s*\)', '', payload["reason"]).strip()
+        if not payload["reason"]:
+            payload["reason"] = "ร่างกายอยู่ในเกณฑ์ปกติ"
 
+    _target_date_override = None
     return payload
+
+
+def get_calendar_month(parquet_dir: str | Path, year: int, month: int) -> dict[str, Any]:
+    """Return daily readiness scores for a specific month."""
+    import calendar as cal_mod
+    parquet_dir = Path(parquet_dir)
+    today = date.today()
+    con = duckdb.connect(":memory:")
+    con.execute("SET TimeZone='Asia/Bangkok'")
+
+    first_day = date(year, month, 1)
+    last_day = date(year, month, cal_mod.monthrange(year, month)[1])
+
+    def _cal_query(sql: str) -> list:
+        return con.execute(sql).fetchall()
+
+    hrv_by_day: dict = {}
+    rhr_by_day: dict = {}
+    steps_by_day: dict = {}
+    sleep_by_day: dict = {}
+    workout_days: set = set()
+
+    # Load data covering this month + 60 days before for baseline
+    start_str = str(first_day - timedelta(days=60))
+    end_str = str(last_day)
+
+    hrv_p = parquet_dir / "hrv_sdnn.parquet"
+    rhr_p = parquet_dir / "resting_heart_rate.parquet"
+    steps_p = parquet_dir / "steps.parquet"
+    sleep_p = parquet_dir / "sleep.parquet"
+    workouts_p = parquet_dir / "workouts.parquet"
+
+    if hrv_p.exists():
+        rows = _cal_query(f"""
+            SELECT CAST(start AS DATE) AS d, median(value) AS v
+            FROM read_parquet('{hrv_p.as_posix()}')
+            WHERE CAST(start AS DATE) >= DATE '{start_str}'
+              AND CAST(start AS DATE) <= DATE '{end_str}'
+            GROUP BY 1 ORDER BY 1
+        """)
+        hrv_by_day = {r[0]: float(r[1]) for r in rows if r[1]}
+
+    if rhr_p.exists():
+        rows = _cal_query(f"""
+            SELECT CAST(start AS DATE) AS d, avg(value) AS v
+            FROM read_parquet('{rhr_p.as_posix()}')
+            WHERE CAST(start AS DATE) >= DATE '{start_str}'
+              AND CAST(start AS DATE) <= DATE '{end_str}'
+            GROUP BY 1 ORDER BY 1
+        """)
+        rhr_by_day = {r[0]: float(r[1]) for r in rows if r[1]}
+
+    if steps_p.exists():
+        rows = _cal_query(f"""
+            SELECT CAST(start AS DATE) AS d, sum(value) AS v
+            FROM read_parquet('{steps_p.as_posix()}')
+            WHERE CAST(start AS DATE) >= DATE '{str(first_day - timedelta(days=1))}'
+              AND CAST(start AS DATE) <= DATE '{end_str}'
+            GROUP BY 1
+        """)
+        steps_by_day = {r[0]: float(r[1]) for r in rows if r[1]}
+
+    if sleep_p.exists():
+        rows = _cal_query(f"""
+            SELECT CAST("end" AS DATE) AS d,
+                   SUM(CASE WHEN stage LIKE '%AsleepCore%' OR stage LIKE '%AsleepDeep%'
+                            OR stage LIKE '%AsleepREM%' THEN
+                       EXTRACT(EPOCH FROM ("end" - start)) / 3600.0 ELSE 0 END) AS hours
+            FROM read_parquet('{sleep_p.as_posix()}')
+            WHERE CAST("end" AS DATE) >= DATE '{str(first_day)}'
+              AND CAST("end" AS DATE) <= DATE '{end_str}'
+            GROUP BY 1
+        """)
+        sleep_by_day = {r[0]: float(r[1]) for r in rows if r[1] and float(r[1]) > 0}
+
+    if workouts_p.exists():
+        rows = _cal_query(f"""
+            SELECT DISTINCT CAST(start AS DATE) AS d
+            FROM read_parquet('{workouts_p.as_posix()}')
+            WHERE CAST(start AS DATE) >= DATE '{str(first_day - timedelta(days=14))}'
+              AND CAST(start AS DATE) <= DATE '{end_str}'
+        """)
+        workout_days = {r[0] for r in rows}
+
+    days_in_month = cal_mod.monthrange(year, month)[1]
+    results = []
+    for day_num in range(1, days_in_month + 1):
+        d = date(year, month, day_num)
+        if d > today:
+            results.append({"date": str(d), "score": None, "color": "none", "has_workout": False})
+            continue
+
+        prior_hrv = [v for dd, v in hrv_by_day.items() if dd < d and (d - dd).days <= 60]
+        prior_rhr = [v for dd, v in rhr_by_day.items() if dd < d and (d - dd).days <= 60]
+
+        hrv_val = hrv_by_day.get(d)
+        rhr_val = rhr_by_day.get(d)
+        hrv_base = sum(prior_hrv) / len(prior_hrv) if len(prior_hrv) >= 7 else None
+        rhr_base = sum(prior_rhr) / len(prior_rhr) if len(prior_rhr) >= 7 else None
+        prev_steps = steps_by_day.get(d - timedelta(days=1))
+        sleep_hours = sleep_by_day.get(d)
+
+        streak = 0
+        for j in range(1, 15):
+            if (d - timedelta(days=j)) in workout_days:
+                streak += 1
+            else:
+                break
+
+        score, label, color, reason = compute_readiness(
+            hrv_val, hrv_base, rhr_val, rhr_base,
+            prev_steps, streak, sleep_hours, d.weekday(),
+        )
+
+        results.append({
+            "date": str(d),
+            "score": score,
+            "color": color,
+            "has_workout": d in workout_days,
+        })
+
+    thai_months = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+    return {
+        "year": year,
+        "month": month,
+        "month_th": thai_months[month],
+        "first_weekday": first_day.weekday(),  # 0=Mon
+        "days": results,
+    }

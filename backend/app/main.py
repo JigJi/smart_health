@@ -231,9 +231,19 @@ def narrate(day: str | None = None) -> dict[str, Any]:
 
 
 @app.get("/today")
-def today_endpoint() -> dict[str, Any]:
+def today_endpoint(date: str | None = None) -> dict[str, Any]:
     """Unified daily dashboard — readiness, strain, recovery, sleep, tip."""
-    return get_today(PARQUET_DIR)
+    return get_today(PARQUET_DIR, target_date=date)
+
+
+@app.get("/calendar")
+def calendar_endpoint(year: int | None = None, month: int | None = None) -> dict[str, Any]:
+    """Score summary for calendar view — one month at a time."""
+    from .readiness import get_calendar_month
+    from datetime import date
+    y = year or date.today().year
+    m = month or date.today().month
+    return get_calendar_month(PARQUET_DIR, y, m)
 
 
 @app.get("/overview")
