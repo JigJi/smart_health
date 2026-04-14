@@ -44,11 +44,15 @@ def _th(t: str) -> str:
 def build_activity_profile(parquet_dir: str | Path, days: int = 365) -> dict[str, Any]:
     """Analyze user's workout patterns + state-linked behavior.
 
+    Patterns are split by is_weekend because users often behave
+    differently on weekday vs weekend (more time, different activities).
+
     Returns dict with:
       - top_types: [(name_th, count), ...] — user's most-done activities
-      - low_hrv_patterns: [(name_th, count), ...] — what they do when HRV low
-      - high_hrv_patterns: [(name_th, count), ...] — what they do when HRV high
-      - rest_rate_low_hrv: % of low-HRV days user skipped workout
+      - low_hrv_patterns_weekday: what they do on low-HRV weekdays
+      - low_hrv_patterns_weekend: what they do on low-HRV weekends
+      - high_hrv_patterns_weekday / weekend: same split for high-HRV
+      - rest_rate_low_hrv_weekday / weekend
       - preferred_time: 'morning' | 'evening' | 'mixed'
     """
     pq = Path(parquet_dir)
@@ -60,9 +64,12 @@ def build_activity_profile(parquet_dir: str | Path, days: int = 365) -> dict[str
 
     profile: dict[str, Any] = {
         "top_types": [],
-        "low_hrv_patterns": [],
-        "high_hrv_patterns": [],
-        "rest_rate_low_hrv": None,
+        "low_hrv_patterns_weekday": [],
+        "low_hrv_patterns_weekend": [],
+        "high_hrv_patterns_weekday": [],
+        "high_hrv_patterns_weekend": [],
+        "rest_rate_low_hrv_weekday": None,
+        "rest_rate_low_hrv_weekend": None,
         "preferred_time": None,
     }
 
@@ -141,77 +148,93 @@ def build_activity_profile(parquet_dir: str | Path, days: int = 365) -> dict[str
           WHERE CAST(start AS DATE) >= current_date - INTERVAL {days} DAY
           GROUP BY 1
         )
-        SELECT b.state, b.d, dw.types
+        SELECT b.state, b.d, EXTRACT(DOW FROM b.d) AS dow, dw.types
         FROM bucketed b
         LEFT JOIN day_workouts dw ON b.d = dw.d
     """).fetchall()
 
-    low_counts: dict[str, int] = {}
-    high_counts: dict[str, int] = {}
-    low_rest = 0
-    low_total = 0
-    for state, _d, types in state_rows:
-        if state == "low":
-            low_total += 1
-            if not types:
-                low_rest += 1
-            else:
-                for t in types.split(","):
-                    low_counts[_th(t)] = low_counts.get(_th(t), 0) + 1
-        elif state == "high":
-            if types:
-                for t in types.split(","):
-                    high_counts[_th(t)] = high_counts.get(_th(t), 0) + 1
+    # Split counters by is_weekend (DOW: 0=Sun, 6=Sat in DuckDB; weekend = 0 or 6)
+    buckets = {
+        "low_weekday": {"counts": {}, "rest": 0, "total": 0},
+        "low_weekend": {"counts": {}, "rest": 0, "total": 0},
+        "high_weekday": {"counts": {}, "rest": 0, "total": 0},
+        "high_weekend": {"counts": {}, "rest": 0, "total": 0},
+    }
 
-    profile["low_hrv_patterns"] = sorted(low_counts.items(), key=lambda x: -x[1])[:5]
-    profile["high_hrv_patterns"] = sorted(high_counts.items(), key=lambda x: -x[1])[:5]
-    profile["rest_rate_low_hrv"] = (low_rest / low_total) if low_total > 0 else None
-    profile["_low_hrv_day_count"] = low_total
-    profile["_high_hrv_day_count"] = sum(1 for s, _, _ in state_rows if s == "high")
+    for state, _d, dow, types in state_rows:
+        if state not in ("low", "high"):
+            continue
+        is_weekend = int(dow) in (0, 6)
+        key = f"{state}_{'weekend' if is_weekend else 'weekday'}"
+        buckets[key]["total"] += 1
+        if not types:
+            buckets[key]["rest"] += 1
+        else:
+            for t in types.split(","):
+                name = _th(t)
+                buckets[key]["counts"][name] = buckets[key]["counts"].get(name, 0) + 1
+
+    def _top(bucket):
+        return sorted(bucket["counts"].items(), key=lambda x: -x[1])[:5]
+
+    def _rest_rate(bucket):
+        return (bucket["rest"] / bucket["total"]) if bucket["total"] > 0 else None
+
+    profile["low_hrv_patterns_weekday"] = _top(buckets["low_weekday"])
+    profile["low_hrv_patterns_weekend"] = _top(buckets["low_weekend"])
+    profile["high_hrv_patterns_weekday"] = _top(buckets["high_weekday"])
+    profile["high_hrv_patterns_weekend"] = _top(buckets["high_weekend"])
+    profile["rest_rate_low_hrv_weekday"] = _rest_rate(buckets["low_weekday"])
+    profile["rest_rate_low_hrv_weekend"] = _rest_rate(buckets["low_weekend"])
+    profile["_low_weekday_n"] = buckets["low_weekday"]["total"]
+    profile["_low_weekend_n"] = buckets["low_weekend"]["total"]
 
     return profile
 
 
-def personalize_recovery_tip(profile: dict[str, Any]) -> dict[str, Any] | None:
-    """Given a low-HRV state, build a tip from user's actual past behavior."""
-    patterns = profile.get("low_hrv_patterns", [])
-    rest_rate = profile.get("rest_rate_low_hrv")
+def personalize_recovery_tip(profile: dict[str, Any], is_weekend: bool) -> dict[str, Any] | None:
+    """Given a low-HRV state, build a tip from user's actual past behavior.
+    Uses weekday or weekend bucket depending on today — patterns differ."""
+    key = "weekend" if is_weekend else "weekday"
+    day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
+    patterns = profile.get(f"low_hrv_patterns_{key}", [])
+    rest_rate = profile.get(f"rest_rate_low_hrv_{key}")
 
     if not patterns and rest_rate is None:
         return None
 
     options: list[str] = []
-    # Top 2 activities user actually did on low-HRV days
     for name, count in patterns[:2]:
-        options.append(f"{name} — คุณเคยทำ {count} ครั้งในวันคล้ายกัน")
+        options.append(f"{name} — เคยทำ {count} ครั้งใน{day_label}คล้ายกัน")
 
-    # Rest rate context
     if rest_rate is not None and rest_rate >= 0.2:
         pct = int(rest_rate * 100)
-        options.append(f"พักเฉยๆ — คุณเลือกทำ {pct}% ของวันแบบนี้")
+        options.append(f"พักเฉยๆ — เลือกทำ {pct}% ของ{day_label}แบบนี้")
 
     if not options:
         return None
 
     return {
         "category": "recovery_personal",
-        "headline": "วันที่ HRV ต่ำแบบนี้ คุณมักจะ…",
+        "headline": f"{day_label}ที่ HRV ต่ำแบบนี้ คุณมักจะ…",
         "options": options[:3],
     }
 
 
-def personalize_performance_tip(profile: dict[str, Any]) -> dict[str, Any] | None:
-    """Given high-HRV state, what does user typically do?"""
-    patterns = profile.get("high_hrv_patterns", [])
+def personalize_performance_tip(profile: dict[str, Any], is_weekend: bool) -> dict[str, Any] | None:
+    """Given high-HRV state, what does user typically do (weekday vs weekend)?"""
+    key = "weekend" if is_weekend else "weekday"
+    day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
+    patterns = profile.get(f"high_hrv_patterns_{key}", [])
     if not patterns:
         return None
 
     options: list[str] = []
     for name, count in patterns[:3]:
-        options.append(f"{name} — คุณเคยทำ {count} ครั้งในวันที่พร้อม")
+        options.append(f"{name} — เคยทำ {count} ครั้งใน{day_label}ที่พร้อม")
 
     return {
         "category": "performance_personal",
-        "headline": "วันที่ร่างกายพร้อมแบบนี้ คุณมักจะ…",
+        "headline": f"{day_label}ที่ร่างกายพร้อมแบบนี้ คุณมักจะ…",
         "options": options[:3],
     }

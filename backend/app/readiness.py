@@ -396,7 +396,9 @@ def _compute_tips(
     )
 
     tips: list[dict[str, Any]] = []
-    now_hour = datetime.now().hour
+    now = datetime.now()
+    now_hour = now.hour
+    is_weekend = now.weekday() >= 5  # 5=Sat, 6=Sun
 
     hrv_pct = ((hrv_val - hrv_base) / hrv_base * 100) if (hrv_val and hrv_base) else None
     has_workout = len(workouts_today) > 0
@@ -406,10 +408,10 @@ def _compute_tips(
 
     # Rule 1: HRV warning + no workout → personalized recovery tip
     if hrv_pct is not None and hrv_pct <= -15 and not has_workout and now_hour < 19:
-        personal = personalize_recovery_tip(profile)
+        personal = personalize_recovery_tip(profile, is_weekend)
         if personal:
-            # Prepend personalized headline with user's actual HRV %
-            personal["headline"] = f"HRV ต่ำกว่าปกติ {abs(int(hrv_pct))}% · สถานะคล้ายในอดีต คุณมักจะ…"
+            day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
+            personal["headline"] = f"HRV ต่ำ {abs(int(hrv_pct))}% · {day_label}ที่คล้ายกัน คุณมักจะ…"
             tips.append(personal)
         else:
             # Fallback if no history yet
@@ -424,9 +426,10 @@ def _compute_tips(
 
     # Rule 2: Overtraining signal
     elif hrv_pct is not None and hrv_pct <= -8 and streak >= 3:
-        personal = personalize_recovery_tip(profile)
+        personal = personalize_recovery_tip(profile, is_weekend)
         if personal:
-            personal["headline"] = f"ออกกำลังติด {streak} วัน + HRV ลง · สถานะคล้ายในอดีต คุณมักจะ…"
+            day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
+            personal["headline"] = f"ออกกำลังติด {streak} วัน + HRV ลง · {day_label}ที่คล้ายกัน คุณมักจะ…"
             tips.append(personal)
         else:
             tips.append({
@@ -437,9 +440,10 @@ def _compute_tips(
 
     # Rule 3: Ready for high intensity → personalized performance tip
     elif hrv_pct is not None and hrv_pct >= 10 and not has_workout and streak <= 2:
-        personal = personalize_performance_tip(profile)
+        personal = personalize_performance_tip(profile, is_weekend)
         if personal:
-            personal["headline"] = "ร่างกายพร้อมเต็มที่ · สถานะคล้ายในอดีต คุณมักจะ…"
+            day_label = "วันหยุด" if is_weekend else "วันธรรมดา"
+            personal["headline"] = f"ร่างกายพร้อมเต็มที่ · {day_label}ที่คล้ายกัน คุณมักจะ…"
             tips.append(personal)
         else:
             tips.append({
