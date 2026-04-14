@@ -460,9 +460,9 @@ def _compute_tips(
                     "category": "sleep",
                     "headline": f"เข้านอน {bedtime} + HRV ต่ำ",
                     "options": [
-                        "คืนนี้ลอง bedtime 23:00–23:30",
-                        "HRV มัก response ภายใน 1 คืนถ้า circadian align",
-                        "ปิดจอ 30 นาทีก่อนนอน ช่วย melatonin rise",
+                        "คืนนี้ลองเข้านอน 23:00–23:30",
+                        "HRV มักดีขึ้นภายใน 1 คืน ถ้าปรับจังหวะการนอนได้",
+                        "ปิดจอก่อนนอน 30 นาที ช่วยให้ร่างกายง่วงเร็วขึ้น",
                     ],
                 })
         except (ValueError, IndexError):
@@ -474,9 +474,9 @@ def _compute_tips(
             "category": "sleep",
             "headline": f"นอนแค่ {sleep_hours} ชม. เมื่อคืน",
             "options": [
-                "Power nap 20–30 นาที ก่อน 15:00",
-                "Boost HRV + alertness ได้ชัด",
-                "เลี่ยงเกิน 30 นาที — จะเข้า deep sleep ตื่นงง",
+                "งีบ 20–30 นาที ก่อนบ่าย 3 โมง",
+                "ช่วยให้ HRV และความตื่นตัวดีขึ้นชัดเจน",
+                "ถ้านานเกิน 30 นาที จะหลับลึก ตื่นมาจะงง",
             ],
         })
 
@@ -486,8 +486,8 @@ def _compute_tips(
             "category": "habit",
             "headline": "เคลื่อนไหวน้อยเมื่อวาน",
             "options": [
-                "เดิน 15–20 นาที ไม่ต้อง structure",
-                "Circulation + HRV response ดีกว่า sedentary",
+                "เดิน 15–20 นาที ไม่ต้องวางแผนอะไรมาก",
+                "ช่วยการไหลเวียนเลือด ดีกว่านั่งอยู่นิ่งๆ",
             ],
         })
 
