@@ -10,8 +10,11 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var hk: HealthKitManager
 
-    // TODO: เปลี่ยนเป็น IP จริงของ Mac
-    let dashboardURL = "http://192.168.1.38:3400"
+    // TODO: เปลี่ยนเป็น tunnel URL ตอน deploy
+    // uid query param lets the frontend forward X-User-Id to backend → data isolation per user
+    var dashboardURL: String {
+        "http://192.168.1.38:3400?uid=\(APIClient.userId())"
+    }
 
     @State private var webReloadTrigger = 0
 

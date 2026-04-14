@@ -8,9 +8,19 @@
 import Foundation
 
 class APIClient {
-    // TODO: เปลี่ยนเป็น URL จริงของ backend
-    // ตอน dev ใช้ localhost ถ้ารัน backend บน Mac เครื่องเดียวกัน
+    // TODO: เปลี่ยนเป็น URL จริงของ backend (ตอน deploy → ใช้ Cloudflare tunnel URL)
     static let baseURL = "http://192.168.1.38:8401"
+
+    /// UUID per install — generated once on first launch, persisted in UserDefaults.
+    /// Ensures each user's data stays isolated on the server (multi-user support).
+    static func userId() -> String {
+        if let existing = UserDefaults.standard.string(forKey: "userId") {
+            return existing
+        }
+        let new = UUID().uuidString
+        UserDefaults.standard.set(new, forKey: "userId")
+        return new
+    }
 
     func postSync(payload: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: "\(Self.baseURL)/sync/shortcut") else {
@@ -21,7 +31,7 @@ class APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("default", forHTTPHeaderField: "X-User-Id")
+        request.setValue(Self.userId(), forHTTPHeaderField: "X-User-Id")
         request.httpBody = payload.data(using: .utf8)
         request.timeoutInterval = 30
 

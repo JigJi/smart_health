@@ -65,8 +65,19 @@ export type RingDay = {
   stand_pct: number | null;
 };
 
+/** Read uid from URL query param once (set by native iOS WebView) */
+function getUid(): string {
+  if (typeof window === 'undefined') return 'default';
+  const params = new URLSearchParams(window.location.search);
+  return params.get('uid') || 'default';
+}
+
 async function j<T>(path: string): Promise<T> {
-  const r = await fetch(`${API}${path}`, { cache: 'no-store' });
+  // Append uid as query param so Next.js API routes can forward it to backend
+  const uid = getUid();
+  const separator = path.includes('?') ? '&' : '?';
+  const url = `${API}${path}${separator}uid=${uid}`;
+  const r = await fetch(url, { cache: 'no-store' });
   if (!r.ok) throw new Error(`${path} ${r.status}`);
   return r.json();
 }
