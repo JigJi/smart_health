@@ -84,14 +84,17 @@ def _hrv_samples_for_day(parquet_dir: Path, d: date) -> list[tuple[str, float]]:
 
 
 def _stress_from_hrv(hrv_val: float, base_mean: float, base_std: float) -> int:
-    """z=0 → 50 (normal), z=-2 → 100 (max stress), z=+2 → 0 (calm).
+    """z=0 → 50 (normal), z=-2 → 100 (max stress), z=+2 → ~5 (calm floor).
 
-    Inverted: lower HRV vs baseline = more stress.
+    Inverted: lower HRV vs baseline = more stress. Clamped to [5, 100]
+    because physiologically a living body always has some autonomic
+    activity — 0 looks like a bug, not "perfectly relaxed." Bevel
+    also floors around 5-6 in practice.
     """
     if not base_std:
         return 50
     z = (hrv_val - base_mean) / base_std
-    return max(0, min(100, round(50 - z * 25)))
+    return max(5, min(100, round(50 - z * 25)))
 
 
 def compute_stress(parquet_dir: Path, target: date | None = None,
