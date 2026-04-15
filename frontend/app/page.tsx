@@ -641,12 +641,14 @@ export default function Home() {
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            {/* Tight top & bottom padding per Jig. Title hugs the top, numbers
-                hug the divider. Timestamp joined to title as inline suffix. */}
+            {/* items-stretch + flex-col justify-between on left column:
+                title pinned to TOP, numbers pinned to BOTTOM (near the
+                divider). Whatever empty space exists sits in the middle
+                between title and numbers, not stacked above/below the
+                whole block — this is what was causing the red-box gaps. */}
             <div className="glass-card px-4 pt-1.5 pb-1.5">
-              <div className="flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  {/* Title + timestamp on the SAME LINE */}
+              <div className="flex items-stretch gap-3">
+                <div className="flex-1 min-w-0 flex flex-col justify-between">
                   <p className="leading-tight">
                     <span className="text-[14px] font-semibold text-white">Stress วันนี้</span>
                     {updatedLabel && (
@@ -655,7 +657,7 @@ export default function Home() {
                       </span>
                     )}
                   </p>
-                  <div className="flex justify-between mt-2 pr-2">
+                  <div className="flex justify-between pr-2">
                     <div>
                       <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
                         {s.highest ?? '—'}
