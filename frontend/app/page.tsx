@@ -637,29 +637,28 @@ export default function Home() {
         const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
 
         // Target layout (per Jig's mockup):
-        //   [Title+timestamp] [Highest] [Lowest] [Average] [Gauge]   ← all one row
-        //   สัปดาห์นี้ avg             47% ↑ เพิ่มขึ้นจากสัปดาห์ก่อน
-        //   ระบบประสาทอัตโนมัติ        ค่อนข้างแปรปรวน · CV 22.2%
+        //   Row 1: Title                              ← top-left
+        //   Row 2: Timestamp                          ← right below title
+        //   Row 3: [Highest] [Lowest] [Average]  [Gauge]   ← numbers left, gauge right
+        //   Row 4: สัปดาห์นี้ avg ... 47% ↑ ...
+        //   Row 5: ระบบประสาท ... variable · CV ...
         const gaugeSize = 72;
 
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
             <div className="glass-card px-4 py-3">
-              {/* Single row: title | highest | lowest | average | gauge */}
-              <div className="flex items-center gap-4">
-                {/* Title + timestamp stacked */}
-                <div className="shrink-0">
-                  <p className="text-[14px] font-semibold text-white leading-tight">Stress วันนี้</p>
-                  {updatedLabel && (
-                    <p className={`text-[10px] leading-tight mt-0.5 ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
-                      อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
-                    </p>
-                  )}
-                </div>
+              {/* Top block: title + timestamp, full-width top */}
+              <p className="text-[14px] font-semibold text-white leading-tight">Stress วันนี้</p>
+              {updatedLabel && (
+                <p className={`text-[10px] leading-tight mt-0.5 ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
+                  อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
+                </p>
+              )}
 
-                {/* 3 numbers — flex grow, evenly spaced */}
-                <div className="flex flex-1 justify-around">
+              {/* Main row: 3 numbers on left (evenly spaced), gauge on right */}
+              <div className="flex items-center justify-between gap-3 mt-2">
+                <div className="flex flex-1 justify-around pr-2">
                   <div>
                     <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
                       {s.highest ?? '—'}
@@ -680,7 +679,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Gauge on far right */}
                 <svg width={gaugeSize} height={gaugeSize} viewBox="0 0 120 120" className="shrink-0">
                   <defs>
                     <linearGradient id="gaugeGrad" x1="0" x2="1" y1="1" y2="0">
@@ -704,7 +702,7 @@ export default function Home() {
                 </svg>
               </div>
 
-              {/* Weekly + CV rows inside card, compact */}
+              {/* Weekly + CV rows, compact with divider */}
               {(s.weekly_avg !== null || s.cv !== null) && (
                 <div className="mt-2.5 pt-2 border-t border-white/5 space-y-1 text-[11px]">
                   {s.weekly_avg !== null && (
