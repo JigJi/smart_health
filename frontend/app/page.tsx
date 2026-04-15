@@ -635,11 +635,18 @@ export default function Home() {
           );
         }
 
-        // Format latest sample freshness — "อัปเดต 14:32"
-        let fresh = '';
+        // Format latest sample time + stale-detection.
+        // Apple Watch logs HRV sparsely (~5 samples/day, only during rest
+        // moments). If the most recent sample is >1h old, the "current"
+        // value is actually stale — tell the user honestly rather than
+        // pretending it's live.
+        let currentTimeLabel = '';
+        let currentStale = false;
         if (s.latest_sample_time) {
           const d = new Date(s.latest_sample_time);
-          fresh = `อัปเดต ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+          currentTimeLabel = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+          const minutesAgo = (Date.now() - d.getTime()) / 60000;
+          currentStale = minutesAgo > 60;
         }
         let peakLabel = '';
         if (s.peak_time) {
@@ -651,7 +658,11 @@ export default function Home() {
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <div className="flex items-baseline justify-between mb-2 px-1">
               <p className="text-[12px] uppercase tracking-[0.15em] text-white/30">Stress</p>
-              {fresh && <span className="text-[10px] text-white/25">{fresh}</span>}
+              {currentTimeLabel && (
+                <span className={`text-[10px] ${currentStale ? 'text-amber-400/70' : 'text-white/25'}`}>
+                  ล่าสุด {currentTimeLabel}{currentStale ? ' · Watch ยังไม่วัดใหม่' : ''}
+                </span>
+              )}
             </div>
             <div className="glass-card p-4">
               {/* Timeline chart */}
@@ -663,11 +674,16 @@ export default function Home() {
                 </p>
               )}
 
-              {/* Current · Peak · Avg row */}
+              {/* Current · Peak · Avg row.
+                  Label "ล่าสุด" not "ตอนนี้" — Apple Watch logs HRV sparsely
+                  so "current" is whenever the most recent rest-moment reading
+                  was, possibly hours ago. Color muted if >1h stale. */}
               <div className="grid grid-cols-3 gap-2 pb-3 border-b border-white/5">
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">ตอนนี้</p>
-                  <p className="text-xl font-semibold tabular-nums" style={{ color: color(s.current!) }}>
+                  <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">
+                    ล่าสุด {currentTimeLabel && <span className="text-white/25 normal-case tracking-normal">· {currentTimeLabel}</span>}
+                  </p>
+                  <p className="text-xl font-semibold tabular-nums" style={{ color: currentStale ? '#888' : color(s.current!) }}>
                     {s.current}<span className="text-[11px] font-normal text-white/40">%</span>
                   </p>
                 </div>
