@@ -71,8 +71,28 @@ def _stress_from_hrv(hrv_val: float, base_mean: float, base_std: float) -> int:
     return max(0, min(100, round(50 - z * 25)))
 
 
-def compute_stress(parquet_dir: Path, target: date | None = None) -> dict[str, Any]:
-    """Altini-style stress summary. Returns partial dict when data sparse."""
+def _strain_boost(today_kcal: float | None) -> int:
+    """Today's completed workout load adds to felt stress.
+
+    Morning HRV alone can't tell you "you're tired from your gym session" —
+    that's a physical load signal, not autonomic. A heavy training day with
+    great morning signals should still register as elevated stress because
+    the body IS depleted, even if it woke up recovered.
+
+    0 kcal → 0 boost, 500 kcal → +20, 1000+ kcal → +40 (capped).
+    """
+    if not today_kcal:
+        return 0
+    return round(min(40, today_kcal / 1000 * 40))
+
+
+def compute_stress(parquet_dir: Path, target: date | None = None,
+                   today_kcal: float | None = None) -> dict[str, Any]:
+    """Stress summary. Autonomic (HRV z-score) + physical load (today's kcal).
+
+    Caller passes today_kcal from strain_data so we don't re-query parquet.
+    Returns partial dict when data sparse.
+    """
     d = target or date.today()
     hrv_by_day = _all_day_hrv_by_day(parquet_dir, days=120)
     if not hrv_by_day:
@@ -88,11 +108,12 @@ def compute_stress(parquet_dir: Path, target: date | None = None) -> dict[str, A
     else:
         base_mean = base_std = None
 
-    # 1. Acute stress today
+    # 1. Acute stress today = autonomic (HRV z-score) + physical (today's strain)
     today_hrv = hrv_by_day.get(d)
     acute = None
     if today_hrv is not None and base_mean is not None:
-        acute = _stress_from_hrv(today_hrv, base_mean, base_std)
+        autonomic = _stress_from_hrv(today_hrv, base_mean, base_std)
+        acute = min(100, autonomic + _strain_boost(today_kcal))
 
     # 2. Weekly avg + trend (this 7d vs prior 7d)
     def _window_stress(start_offset: int, size: int = 7) -> float | None:

@@ -882,9 +882,15 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
     already_worked_out = len(strain_data.get("workouts", [])) > 0
     tip = _generate_tip(score, streak, prev_steps, sleep_hours, dow, already_worked_out)
 
-    # Altini-style stress summary (acute / weekly trend / CV stability)
+    # Altini-style stress summary (acute / weekly trend / CV stability).
+    # Passes today's workout kcal so stress includes physical load, not just
+    # autonomic — morning HRV can say "recovered" while body is depleted from
+    # a big gym session. Altini's HRV alone misses that; we combine.
     from .stress import compute_stress
-    stress_data = compute_stress(parquet_dir, today)
+    stress_data = compute_stress(
+        parquet_dir, today,
+        today_kcal=strain_data.get("active_kcal"),
+    )
 
     # Altini-style illness watcher — multi-signal anomaly for today
     from .illness import detect_today as detect_illness_today
@@ -957,6 +963,9 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
             "rhr_score": rhr_pct,
             "sleep_score": sleep_pct,
         },
+        # Top-level sleep alias for consumers that don't walk into signals.*
+        # (same values, just convenience — mirrors `strain` + `recovery` siblings)
+        "sleep": sleep_data,
         "stress": stress_data,
         "illness": illness_data,
         "tip": tip,

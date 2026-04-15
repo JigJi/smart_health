@@ -107,8 +107,26 @@ print(fmt_score(today['hrv_score'], W_HRV, "HRV"))
 print(fmt_score(today['rhr_score'], W_RHR, "RHR"))
 print(fmt_score(today['sleep_score'], W_SLEEP, "Sleep"))
 
+# Match what the /today endpoint shows: apply the strain decay overlay so
+# this audit number matches what the user actually sees in the dashboard.
+# Pre-decay is the "morning signal only" recovery; post-decay adds today's
+# completed training load (same calc as readiness.py:836-844).
+raw_recovery = today['recovery']
+today_kcal = 0.0
+workouts_today = store.workouts(days=2)
+for w in workouts_today:
+    if w.get('start') and _to_date(w['start']) == _to_date(today['day']):
+        today_kcal += _num(w.get('active_kcal'))
+decay_pct = min(0.30, today_kcal / 1000 * 0.30) if today_kcal else 0
+final_recovery = round(raw_recovery * (1 - decay_pct)) if raw_recovery else raw_recovery
+
 print()
-print(f"🎯 Final recovery: {today['recovery']}%")
+print(f"🎯 Recovery (pre-decay, raw morning signal):  {raw_recovery}%")
+if today_kcal > 0:
+    print(f"   Strain decay overlay: {today_kcal:.0f} kcal → -{decay_pct*100:.0f}%")
+    print(f"🎯 Recovery (post-decay, matches /today):    {final_recovery}%")
+else:
+    print(f"   (no workouts today → no decay, final = raw)")
 print()
 
 # ──────────────────────────────────────────────────────────────

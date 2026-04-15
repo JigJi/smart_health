@@ -138,6 +138,12 @@ export type TodayData = {
     rhr_score: number | null;
     sleep_score: number | null;
   };
+  sleep: {
+    hours: number | null;
+    quality_label: string;
+    bedtime: string | null;
+    wakeup: string | null;
+  } | null;
   stress: {
     acute: number | null;          // today's stress 0-100
     weekly_avg: number | null;     // 7-day avg stress 0-100
