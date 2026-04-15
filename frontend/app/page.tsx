@@ -639,42 +639,42 @@ export default function Home() {
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card p-4">
-              {/* Title row — "Today's stress" + "Last updated HH:MM" */}
-              <div className="mb-3">
+            <div className="glass-card px-4 py-3">
+              {/* Title — compact, no mb */}
+              <div className="flex items-baseline justify-between">
                 <p className="text-[15px] font-semibold text-white">Stress วันนี้</p>
                 {updatedLabel && (
                   <p className={`text-[11px] ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
-                    อัปเดตล่าสุด {updatedLabel}{stale ? ' · Watch ยังไม่วัดใหม่' : ''}
+                    อัปเดต {updatedLabel}{stale ? ' · ไม่สด' : ''}
                   </p>
                 )}
               </div>
 
-              {/* Bevel-style: left = 3 numbers, right = circular gauge */}
-              <div className="grid grid-cols-[1fr_auto] gap-4 items-center">
-                <div className="grid grid-cols-3 gap-2">
+              {/* Bevel-style: 3 numbers + gauge, single centered row */}
+              <div className="flex items-center justify-between gap-3 mt-2">
+                <div className="grid grid-cols-3 gap-3 flex-1">
                   <div>
                     <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
                       {s.highest ?? '—'}
                     </p>
-                    <p className="text-[11px] text-white/50 mt-1">Highest</p>
+                    <p className="text-[11px] text-white/50 mt-0.5">Highest</p>
                   </div>
                   <div>
                     <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#30D158' }}>
                       {s.lowest ?? '—'}
                     </p>
-                    <p className="text-[11px] text-white/50 mt-1">Lowest</p>
+                    <p className="text-[11px] text-white/50 mt-0.5">Lowest</p>
                   </div>
                   <div>
                     <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF9F0A' }}>
                       {s.avg ?? '—'}
                     </p>
-                    <p className="text-[11px] text-white/50 mt-1">Average</p>
+                    <p className="text-[11px] text-white/50 mt-0.5">Average</p>
                   </div>
                 </div>
 
-                {/* Gauge */}
-                <svg width="110" height="110" viewBox="0 0 120 120">
+                {/* Gauge — smaller (85x85) to match Bevel proportion */}
+                <svg width="85" height="85" viewBox="0 0 120 120" className="shrink-0">
                   <defs>
                     <linearGradient id="gaugeGrad" x1="0" x2="1" y1="1" y2="0">
                       <stop offset="0%"   stopColor="#30D158" />
@@ -682,45 +682,43 @@ export default function Home() {
                       <stop offset="100%" stopColor="#FF453A" />
                     </linearGradient>
                   </defs>
-                  {/* Track background */}
-                  <path d={bgArc} stroke="rgba(255,255,255,0.08)" strokeWidth="8" fill="none" strokeLinecap="round" />
-                  {/* Colored gradient arc on top (same path, styled) */}
-                  <path d={bgArc} stroke="url(#gaugeGrad)" strokeWidth="8" fill="none" strokeLinecap="round" opacity="0.35" />
-                  {/* Pointer dot */}
-                  <circle cx={dot.x} cy={dot.y} r="5" fill={gaugeColor}
+                  <path d={bgArc} stroke="rgba(255,255,255,0.08)" strokeWidth="10" fill="none" strokeLinecap="round" />
+                  <path d={bgArc} stroke="url(#gaugeGrad)" strokeWidth="10" fill="none" strokeLinecap="round" opacity="0.35" />
+                  <circle cx={dot.x} cy={dot.y} r="6" fill={gaugeColor}
                           stroke="#141414" strokeWidth="2" />
-                  {/* Center value */}
                   <text x={cx} y={cy - 2} textAnchor="middle"
-                        fontSize="22" fontWeight="600" fill={stale ? '#888' : '#fff'}>
+                        fontSize="24" fontWeight="600" fill={stale ? '#888' : '#fff'}>
                     {gaugeVal}
                   </text>
-                  <text x={cx} y={cy + 16} textAnchor="middle"
-                        fontSize="10" fill="rgba(255,255,255,0.5)">
+                  <text x={cx} y={cy + 18} textAnchor="middle"
+                        fontSize="11" fill="rgba(255,255,255,0.5)">
                     {gaugeLabel}
                   </text>
                 </svg>
               </div>
 
-              {/* Weekly + stability (compact, below main view) */}
-              <div className="pt-3 mt-3 border-t border-white/5 space-y-1.5 text-[12px]">
-                {s.weekly_avg !== null && (
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-white/50">สัปดาห์นี้ avg</span>
-                    <span className="text-white/80 tabular-nums">
-                      {s.weekly_avg}% <span className="text-white/40">{trendIcon} {trendText}</span>
-                    </span>
-                  </div>
-                )}
-                {s.cv !== null && (
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-white/50">ระบบประสาทอัตโนมัติ</span>
-                    <span className="tabular-nums">
-                      <span style={{ color: stab.color }}>{stab.label}</span>
-                      <span className="text-white/30"> · CV {s.cv}%</span>
-                    </span>
-                  </div>
-                )}
-              </div>
+              {/* Weekly + stability — inline with subtle top border */}
+              {(s.weekly_avg !== null || s.cv !== null) && (
+                <div className="mt-3 pt-2.5 border-t border-white/5 space-y-1 text-[11.5px]">
+                  {s.weekly_avg !== null && (
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-white/45">สัปดาห์นี้ avg</span>
+                      <span className="text-white/75 tabular-nums">
+                        {s.weekly_avg}% <span className="text-white/35">{trendIcon} {trendText}</span>
+                      </span>
+                    </div>
+                  )}
+                  {s.cv !== null && (
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-white/45">ระบบประสาทอัตโนมัติ</span>
+                      <span className="tabular-nums">
+                        <span style={{ color: stab.color }}>{stab.label}</span>
+                        <span className="text-white/30"> · CV {s.cv}%</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         );
