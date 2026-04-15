@@ -20,10 +20,31 @@ Usage:
 """
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 from datetime import date, timedelta
 from statistics import mean
+
+
+def _num(v) -> float:
+    """Coerce to float, treating None and NaN as 0 so sum() doesn't poison."""
+    if v is None:
+        return 0.0
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if math.isnan(f) else f
+
+
+def _to_date(v):
+    """Accept datetime/Timestamp/date/str — return date."""
+    if hasattr(v, "date"):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    return date.fromisoformat(str(v)[:10])
 
 if len(sys.argv) < 2:
     print("usage: python -m scripts.debug_recovery <user_id>")
@@ -125,22 +146,22 @@ workouts = store.workouts(days=7)
 if not workouts:
     print("  No workouts in last 7 days → strain adjustment = 0 (no change)")
 else:
-    today_date = date.fromisoformat(today['day'])
+    today_date = _to_date(today['day'])
     yest = today_date - timedelta(days=1)
     yest_kcal = sum(
-        float(w.get('active_kcal') or 0)
+        _num(w.get('active_kcal'))
         for w in workouts
-        if w.get('start') and w['start'].date() == yest
+        if w.get('start') and _to_date(w['start']) == yest
     )
     last3_kcal = sum(
-        float(w.get('active_kcal') or 0)
+        _num(w.get('active_kcal'))
         for w in workouts
-        if w.get('start') and (today_date - w['start'].date()).days <= 3
+        if w.get('start') and (today_date - _to_date(w['start'])).days <= 3
     )
     last7_kcal = sum(
-        float(w.get('active_kcal') or 0)
+        _num(w.get('active_kcal'))
         for w in workouts
-        if w.get('start') and (today_date - w['start'].date()).days <= 7
+        if w.get('start') and (today_date - _to_date(w['start'])).days <= 7
     )
     print(f"  Yesterday workout kcal:   {yest_kcal:.0f}")
     print(f"  Last 3d total kcal:       {last3_kcal:.0f}")
@@ -174,7 +195,13 @@ if last7_sleep:
     print(f"  Avg sleep 7d:             {avg7:.1f} hr")
     print(f"  Deficit per night:        {deficit_per_night:+.2f} hr (target {SLEEP_TARGET_MIN/60:.0f} hr)")
     print(f"  Cumulative 7d deficit:    {total_deficit:+.1f} hr")
-    if deficit_per_night > 0.5:
+    # Negative deficit_per_night (asleep > target) with a huge 7d total is a
+    # sign of DATA corruption, not genuinely sleeping 20 hours a night.
+    if avg7 > 11:
+        print(f"  🛑 Sleep data looks corrupted (avg {avg7:.1f} hr/night).")
+        print(f"     Likely cause: overlapping Asleep-legacy + AsleepCore/Deep/REM stages")
+        print(f"     in sleep.parquet being double-summed. Run debug_sleep.py to confirm.")
+    elif deficit_per_night > 0.5:
         print("  ⚠️ chronic sleep deficit — our model doesn't currently factor this")
     else:
         print("  ✓ sleep pattern OK over last week")
