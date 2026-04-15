@@ -636,45 +636,50 @@ export default function Home() {
         };
         const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
 
+        // Card body height follows the gauge. Gauge = 72px, numbers block
+        // centers to same height. Weekly/CV info dropped from this card —
+        // lived in footer previously but bloated the card. Can add back as
+        // a separate tiny card / tooltip if Jig misses them.
+        const gaugeSize = 72;
+
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card px-4 py-3">
-              {/* Title — compact, no mb */}
+            <div className="glass-card px-4 py-2.5">
+              {/* Compact header: title | timestamp */}
               <div className="flex items-baseline justify-between">
-                <p className="text-[15px] font-semibold text-white">Stress วันนี้</p>
+                <p className="text-[14px] font-semibold text-white">Stress วันนี้</p>
                 {updatedLabel && (
-                  <p className={`text-[11px] ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
-                    อัปเดต {updatedLabel}{stale ? ' · ไม่สด' : ''}
+                  <p className={`text-[10px] ${stale ? 'text-amber-400/70' : 'text-white/35'}`}>
+                    {updatedLabel}{stale ? ' · ไม่สด' : ''}
                   </p>
                 )}
               </div>
 
-              {/* Bevel-style: 3 numbers + gauge, single centered row */}
-              <div className="flex items-center justify-between gap-3 mt-2">
-                <div className="grid grid-cols-3 gap-3 flex-1">
+              {/* Main row — 3 numbers + gauge, gauge fits row height */}
+              <div className="flex items-center justify-between gap-3 mt-1.5">
+                <div className="grid grid-cols-3 gap-2 flex-1">
                   <div>
-                    <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
+                    <p className="text-[20px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
                       {s.highest ?? '—'}
                     </p>
-                    <p className="text-[11px] text-white/50 mt-0.5">Highest</p>
+                    <p className="text-[10px] text-white/50 mt-0.5">Highest</p>
                   </div>
                   <div>
-                    <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#30D158' }}>
+                    <p className="text-[20px] tabular-nums font-semibold leading-none" style={{ color: '#30D158' }}>
                       {s.lowest ?? '—'}
                     </p>
-                    <p className="text-[11px] text-white/50 mt-0.5">Lowest</p>
+                    <p className="text-[10px] text-white/50 mt-0.5">Lowest</p>
                   </div>
                   <div>
-                    <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF9F0A' }}>
+                    <p className="text-[20px] tabular-nums font-semibold leading-none" style={{ color: '#FF9F0A' }}>
                       {s.avg ?? '—'}
                     </p>
-                    <p className="text-[11px] text-white/50 mt-0.5">Average</p>
+                    <p className="text-[10px] text-white/50 mt-0.5">Average</p>
                   </div>
                 </div>
 
-                {/* Gauge — smaller (85x85) to match Bevel proportion */}
-                <svg width="85" height="85" viewBox="0 0 120 120" className="shrink-0">
+                <svg width={gaugeSize} height={gaugeSize} viewBox="0 0 120 120" className="shrink-0">
                   <defs>
                     <linearGradient id="gaugeGrad" x1="0" x2="1" y1="1" y2="0">
                       <stop offset="0%"   stopColor="#30D158" />
@@ -682,44 +687,40 @@ export default function Home() {
                       <stop offset="100%" stopColor="#FF453A" />
                     </linearGradient>
                   </defs>
-                  <path d={bgArc} stroke="rgba(255,255,255,0.08)" strokeWidth="10" fill="none" strokeLinecap="round" />
-                  <path d={bgArc} stroke="url(#gaugeGrad)" strokeWidth="10" fill="none" strokeLinecap="round" opacity="0.35" />
-                  <circle cx={dot.x} cy={dot.y} r="6" fill={gaugeColor}
-                          stroke="#141414" strokeWidth="2" />
+                  <path d={bgArc} stroke="rgba(255,255,255,0.08)" strokeWidth="12" fill="none" strokeLinecap="round" />
+                  <path d={bgArc} stroke="url(#gaugeGrad)" strokeWidth="12" fill="none" strokeLinecap="round" opacity="0.35" />
+                  <circle cx={dot.x} cy={dot.y} r="7" fill={gaugeColor}
+                          stroke="#141414" strokeWidth="2.5" />
                   <text x={cx} y={cy - 2} textAnchor="middle"
-                        fontSize="24" fontWeight="600" fill={stale ? '#888' : '#fff'}>
+                        fontSize="26" fontWeight="600" fill={stale ? '#888' : '#fff'}>
                     {gaugeVal}
                   </text>
-                  <text x={cx} y={cy + 18} textAnchor="middle"
-                        fontSize="11" fill="rgba(255,255,255,0.5)">
+                  <text x={cx} y={cy + 20} textAnchor="middle"
+                        fontSize="12" fill="rgba(255,255,255,0.5)">
                     {gaugeLabel}
                   </text>
                 </svg>
               </div>
-
-              {/* Weekly + stability — inline with subtle top border */}
-              {(s.weekly_avg !== null || s.cv !== null) && (
-                <div className="mt-3 pt-2.5 border-t border-white/5 space-y-1 text-[11.5px]">
-                  {s.weekly_avg !== null && (
-                    <div className="flex items-baseline justify-between">
-                      <span className="text-white/45">สัปดาห์นี้ avg</span>
-                      <span className="text-white/75 tabular-nums">
-                        {s.weekly_avg}% <span className="text-white/35">{trendIcon} {trendText}</span>
-                      </span>
-                    </div>
-                  )}
-                  {s.cv !== null && (
-                    <div className="flex items-baseline justify-between">
-                      <span className="text-white/45">ระบบประสาทอัตโนมัติ</span>
-                      <span className="tabular-nums">
-                        <span style={{ color: stab.color }}>{stab.label}</span>
-                        <span className="text-white/30"> · CV {s.cv}%</span>
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
+
+            {/* Weekly + stability as TINY single-line below card — no bloat.
+                Always visible if data exists, but minimal ink. */}
+            {(s.weekly_avg !== null || s.cv !== null) && (
+              <div className="px-1 mt-1.5 flex items-center justify-between text-[10.5px] text-white/40">
+                {s.weekly_avg !== null ? (
+                  <span>
+                    สัปดาห์นี้ {s.weekly_avg}%{' '}
+                    <span className="text-white/30">{trendIcon} {trendText}</span>
+                  </span>
+                ) : <span />}
+                {s.cv !== null && (
+                  <span>
+                    <span style={{ color: stab.color }}>{stab.label}</span>
+                    <span className="text-white/25"> · CV {s.cv}%</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         );
       })()}
