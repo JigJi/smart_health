@@ -636,53 +636,47 @@ export default function Home() {
         };
         const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
 
-        // Target layout (per Jig's mockup, take 5):
-        //   LEFT COLUMN (stacked):  title / timestamp / 3 numbers with labels
-        //   RIGHT COLUMN (center-aligned to left stack): gauge
-        //   Below both columns (full-width): weekly + CV rows
-        //
-        // Key: gauge is vertically centered against the LEFT stack, which is
-        // what makes the card "snug" — no empty space above or below the gauge.
-        const gaugeSize = 72;
+        // Gauge sized to match LEFT STACK height (title + timestamp + numbers
+        // + labels = ~95px). Smaller gauge leaves empty space above/below
+        // which Jig flagged with red boxes. 96px gauge with 12px padding
+        // ≈ left stack 90-95px — no dead space on either side.
+        const gaugeSize = 96;
 
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card px-4 py-3">
+            <div className="glass-card px-4 py-2.5">
               {/* Two columns: left stack (title + timestamp + numbers) | right gauge */}
               <div className="flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  {/* Title + timestamp */}
                   <p className="text-[14px] font-semibold text-white leading-tight">Stress วันนี้</p>
                   {updatedLabel && (
                     <p className={`text-[10px] leading-tight mt-0.5 ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
                       อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
                     </p>
                   )}
-                  {/* Numbers directly below, in same left column */}
-                  <div className="flex gap-5 mt-2">
+                  <div className="flex gap-5 mt-1.5">
                     <div>
                       <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
                         {s.highest ?? '—'}
                       </p>
-                      <p className="text-[10px] text-white/50 mt-0.5">Highest</p>
+                      <p className="text-[10px] text-white/50 mt-0.5 leading-none">Highest</p>
                     </div>
                     <div>
                       <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#30D158' }}>
                         {s.lowest ?? '—'}
                       </p>
-                      <p className="text-[10px] text-white/50 mt-0.5">Lowest</p>
+                      <p className="text-[10px] text-white/50 mt-0.5 leading-none">Lowest</p>
                     </div>
                     <div>
                       <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF9F0A' }}>
                         {s.avg ?? '—'}
                       </p>
-                      <p className="text-[10px] text-white/50 mt-0.5">Average</p>
+                      <p className="text-[10px] text-white/50 mt-0.5 leading-none">Average</p>
                     </div>
                   </div>
                 </div>
 
-                {/* Gauge — vertically centers against the left stack */}
                 <svg width={gaugeSize} height={gaugeSize} viewBox="0 0 120 120" className="shrink-0">
                   <defs>
                     <linearGradient id="gaugeGrad" x1="0" x2="1" y1="1" y2="0">
@@ -706,9 +700,8 @@ export default function Home() {
                 </svg>
               </div>
 
-              {/* Weekly + CV rows below, full-width, spanning both columns */}
               {(s.weekly_avg !== null || s.cv !== null) && (
-                <div className="mt-2.5 pt-2 border-t border-white/5 space-y-1 text-[11px]">
+                <div className="mt-2 pt-1.5 border-t border-white/5 space-y-0.5 text-[11px]">
                   {s.weekly_avg !== null && (
                     <div className="flex items-baseline justify-between">
                       <span className="text-white/50">สัปดาห์นี้ avg</span>
