@@ -9,7 +9,7 @@ The Shortcut sends plain text lines (easiest to build in Shortcuts):
   HR|2026-04-12T09:05:00+0700|75
   HRV|2026-04-12T06:00:00+0700|35.5
   RHR|2026-04-12T08:00:00+0700|63
-  WK|TraditionalStrengthTraining|2026-04-12T17:00:00+0700|55|120|155
+  WK|TraditionalStrengthTraining|2026-04-12T17:00:00+0700|55|120|155|320
   STEPS|2026-04-12T12:00:00+0700|5432
 
 This is trivially easy to build in Shortcuts using "Combine Text".
@@ -68,6 +68,8 @@ def parse_shortcut_text(text: str) -> dict[str, Any]:
                 workout["hr_avg"] = float(parts[4])
             if len(parts) > 5 and parts[5]:
                 workout["hr_max"] = float(parts[5])
+            if len(parts) > 6 and parts[6]:
+                workout["active_kcal"] = float(parts[6])
             payload["workouts"].append(workout)
         elif kind == "STEPS" and len(parts) >= 3:
             payload["steps"].append({

@@ -194,8 +194,12 @@ def _append_parquet(path: Path, rows: list[dict]) -> None:
                 subset=["start", "value"], keep="first"
             )
         elif "type" in combined.columns:
+            # keep="last": newer sync wins on (start, type) collisions.
+            # Critical for schema upgrades — e.g. iOS started sending
+            # active_kcal in WK lines, old rows are NULL → new rows must
+            # overwrite, not get dropped as "duplicates".
             combined = combined.drop_duplicates(
-                subset=["start", "type"], keep="first"
+                subset=["start", "type"], keep="last"
             )
 
         combined.to_parquet(path, index=False)

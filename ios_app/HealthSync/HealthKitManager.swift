@@ -146,8 +146,17 @@ class HealthKitManager: ObservableObject {
         syncStatus = "กำลัง sync..."
         lastSyncAt = Date()
 
+        // Counter-based progress: phasesCompleted/totalPhases, clamped to 1.0
+        // (old accumulator pattern could overflow if guard ever leaked → 539% bug)
         // 10 phases: 9 fetches (HR/HRV/RHR/Steps/Cal/SpO2/RR/Sleep/Workouts) + 1 post
-        let phaseStep = 1.0 / 10.0
+        var phasesCompleted = 0
+        let totalPhases = 10
+        let bumpProgress: () -> Void = {
+            DispatchQueue.main.async {
+                phasesCompleted += 1
+                self.syncProgress = min(1.0, Double(phasesCompleted) / Double(totalPhases))
+            }
+        }
 
         let since = Calendar.current.date(byAdding: .hour, value: -25, to: Date())!
         let group = DispatchGroup()
@@ -160,10 +169,8 @@ class HealthKitManager: ObservableObject {
         fetchSamples(.heartRate, since: since) { samples in
             let mapped = samples.map { "HR|\(self.iso($0.0))|\(String(format: "%.0f", $0.1))" }
             lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
-            DispatchQueue.main.async {
-                self.todayHRCount = samples.count
-                self.syncProgress += phaseStep
-            }
+            DispatchQueue.main.async { self.todayHRCount = samples.count }
+            bumpProgress()
             group.leave()
         }
 
@@ -172,7 +179,7 @@ class HealthKitManager: ObservableObject {
         fetchSamples(.heartRateVariabilitySDNN, since: since) { samples in
             let mapped = samples.map { "HRV|\(self.iso($0.0))|\(String(format: "%.1f", $0.1))" }
             lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
-            DispatchQueue.main.async { self.syncProgress += phaseStep }
+            bumpProgress()
             group.leave()
         }
 
@@ -182,7 +189,7 @@ class HealthKitManager: ObservableObject {
         fetchSamples(.restingHeartRate, since: since7d) { samples in
             let mapped = samples.map { "RHR|\(self.iso($0.0))|\(String(format: "%.0f", $0.1))" }
             lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
-            DispatchQueue.main.async { self.syncProgress += phaseStep }
+            bumpProgress()
             group.leave()
         }
 
@@ -191,7 +198,7 @@ class HealthKitManager: ObservableObject {
         fetchSamples(.stepCount, since: since) { samples in
             let mapped = samples.map { "STEPS|\(self.iso($0.0))|\(String(format: "%.0f", $0.1))" }
             lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
-            DispatchQueue.main.async { self.syncProgress += phaseStep }
+            bumpProgress()
             group.leave()
         }
 
@@ -200,7 +207,7 @@ class HealthKitManager: ObservableObject {
         fetchSamples(.activeEnergyBurned, since: since) { samples in
             let mapped = samples.map { "CAL|\(self.iso($0.0))|\(String(format: "%.1f", $0.1))" }
             lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
-            DispatchQueue.main.async { self.syncProgress += phaseStep }
+            bumpProgress()
             group.leave()
         }
 
@@ -209,7 +216,7 @@ class HealthKitManager: ObservableObject {
         fetchSamples(.oxygenSaturation, since: since) { samples in
             let mapped = samples.map { "SPO2|\(self.iso($0.0))|\(String(format: "%.3f", $0.1))" }
             lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
-            DispatchQueue.main.async { self.syncProgress += phaseStep }
+            bumpProgress()
             group.leave()
         }
 
@@ -218,7 +225,7 @@ class HealthKitManager: ObservableObject {
         fetchSamples(.respiratoryRate, since: since) { samples in
             let mapped = samples.map { "RR|\(self.iso($0.0))|\(String(format: "%.1f", $0.1))" }
             lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
-            DispatchQueue.main.async { self.syncProgress += phaseStep }
+            bumpProgress()
             group.leave()
         }
 
@@ -230,7 +237,7 @@ class HealthKitManager: ObservableObject {
                 "SLEEP|\(self.iso(s.start))|\(self.iso(s.end))|\(s.stage)"
             }
             lock.lock(); lines.append(contentsOf: mapped); lock.unlock()
-            DispatchQueue.main.async { self.syncProgress += phaseStep }
+            bumpProgress()
             group.leave()
         }
 
@@ -252,10 +259,19 @@ class HealthKitManager: ObservableObject {
                         hrMax = String(format: "%.0f", max.doubleValue(for: .count().unitDivided(by: .minute())))
                     }
                 }
-                let line = "WK|\(type)|\(start)|\(dur)|\(hrAvg)|\(hrMax)"
+                // Active energy burned during the workout (sum across the session)
+                var kcal = ""
+                if let estats = w.statistics(for: HKQuantityType(.activeEnergyBurned)),
+                   let sum = estats.sumQuantity() {
+                    kcal = String(format: "%.0f", sum.doubleValue(for: .kilocalorie()))
+                } else if let total = w.totalEnergyBurned {
+                    // Fallback for older HealthKit data where statistics() is nil
+                    kcal = String(format: "%.0f", total.doubleValue(for: .kilocalorie()))
+                }
+                let line = "WK|\(type)|\(start)|\(dur)|\(hrAvg)|\(hrMax)|\(kcal)"
                 lock.lock(); lines.append(line); lock.unlock()
             }
-            DispatchQueue.main.async { self.syncProgress += phaseStep }
+            bumpProgress()
             group.leave()
         }
 
@@ -474,7 +490,14 @@ class HealthKitManager: ObservableObject {
                         hrMax = String(format: "%.0f", mx.doubleValue(for: .count().unitDivided(by: .minute())))
                     }
                 }
-                let line = "WK|\(type)|\(s)|\(dur)|\(hrAvg)|\(hrMax)"
+                var kcal = ""
+                if let estats = w.statistics(for: HKQuantityType(.activeEnergyBurned)),
+                   let sum = estats.sumQuantity() {
+                    kcal = String(format: "%.0f", sum.doubleValue(for: .kilocalorie()))
+                } else if let total = w.totalEnergyBurned {
+                    kcal = String(format: "%.0f", total.doubleValue(for: .kilocalorie()))
+                }
+                let line = "WK|\(type)|\(s)|\(dur)|\(hrAvg)|\(hrMax)|\(kcal)"
                 lock.lock(); lines.append(line); lock.unlock()
             }
             group.leave()
