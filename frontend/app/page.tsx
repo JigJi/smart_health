@@ -646,7 +646,7 @@ export default function Home() {
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card px-4 pt-2 pb-2">
+            <div className="glass-card px-4 pt-1 pb-2">
               <div className="flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="leading-tight">
