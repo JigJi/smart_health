@@ -3,6 +3,11 @@
 import { useEffect, useState } from 'react';
 import { api, TodayData, CalendarMonth } from '@/lib/api';
 
+// localStorage key for stale-while-revalidate dashboard cache.
+// Bump the version suffix when TodayData schema changes so old payloads
+// (with missing/renamed fields) get discarded instead of crashing render.
+const CACHE_KEY = 'smart_health_today_v1';
+
 /* ─── Score label based on actual signals ─── */
 function scoreLabel(data: TodayData): string {
   const { signals, strain } = data;
@@ -232,7 +237,16 @@ export default function Home() {
 
   const loadDay = (date?: string, silent = false) => {
     if (!silent) setLoading(true);
-    api.today(date).then(d => { setData(d); setLoading(false); }).catch(() => { setError(true); setLoading(false); });
+    api.today(date).then(d => {
+      setData(d);
+      setLoading(false);
+      // Persist "today" payload for next session's first paint (SWR pattern).
+      // Skip when a specific date was requested — only the default "today" view
+      // is what users land on first, so that's the only one worth caching.
+      if (!date) {
+        try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch {}
+      }
+    }).catch(() => { setError(true); setLoading(false); });
   };
 
   const loadCalendar = (y: number, m: number) => {
@@ -254,7 +268,14 @@ export default function Home() {
   };
 
   useEffect(() => {
-    loadDay();
+    // Stale-while-revalidate: hydrate from cache for instant first paint,
+    // then fetch fresh data silently in background. Bumps cache key on
+    // schema change so old payloads don't crash render.
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) setData(JSON.parse(cached));
+    } catch {}
+    loadDay(undefined, true);  // silent — no blocking spinner
     loadCalendar(calYear, calMonth);
   }, []);
 
