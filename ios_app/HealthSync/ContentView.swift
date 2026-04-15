@@ -102,7 +102,7 @@ struct OnboardingView: View {
                 Spacer().frame(height: 28)
 
                 // Title
-                Text("สุขภาพดี")
+                Text("livvv")
                     .font(.system(size: 38, weight: .bold))
                     .foregroundColor(.black)
 
@@ -226,7 +226,7 @@ struct SyncView: View {
                 .font(.system(size: 80))
                 .foregroundColor(hk.isAuthorized ? .green : .gray)
 
-            Text("สุขภาพดี")
+            Text("livvv")
                 .font(.title.bold())
 
             Text(hk.isAuthorized ? "เชื่อมต่อแล้ว" : "กำลังเชื่อมต่อ...")

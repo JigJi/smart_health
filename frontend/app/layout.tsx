@@ -2,7 +2,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 
 export const metadata: Metadata = {
-  title: 'สุขภาพดี',
+  title: 'livvv',
   description: 'ผู้ช่วยสุขภาพส่วนตัว',
 };
 
