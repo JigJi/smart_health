@@ -646,24 +646,21 @@ export default function Home() {
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card px-4 pt-1 pb-2 relative">
-              {/* Title absolute-positioned at top-left — can move independently
-                  of the centered numbers+gauge row below. Adjust `top-1` value
-                  (currently 4px) to nudge title up/down without touching numbers. */}
-              <p className="leading-tight absolute top-1 left-4 right-4 z-10">
-                <span className="text-[14px] font-semibold text-white">Stress วันนี้</span>
-                {updatedLabel && (
-                  <span className={`text-[10px] ml-1.5 ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
-                    · อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
-                  </span>
-                )}
-              </p>
-
+            <div className="glass-card px-4 pt-[3px] pb-2">
+              {/* Reverted to items-center (title inside left column). pt-[3px]
+                  = 1px less than original pt-1 (4px) to honor Jig's "1px up"
+                  request after restoring the "เหมือนเดิม" layout. */}
               <div className="flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  {/* Spacer to keep numbers below the absolute-positioned title */}
-                  <div className="h-[18px]" />
-                  <div className="flex justify-between pr-2">
+                  <p className="leading-tight">
+                    <span className="text-[14px] font-semibold text-white">Stress วันนี้</span>
+                    {updatedLabel && (
+                      <span className={`text-[10px] ml-1.5 ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
+                        · อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
+                      </span>
+                    )}
+                  </p>
+                  <div className="flex justify-between mt-2 pr-2">
                     <div>
                       <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
                         {s.highest ?? '—'}
