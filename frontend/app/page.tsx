@@ -636,25 +636,25 @@ export default function Home() {
         };
         const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
 
-        // Gauge bumped up (110px) per Jig's ask. Numbers use justify-between
-        // instead of fixed gap — they now spread evenly across the left
-        // column width instead of clustering at the start.
         const gaugeSize = 110;
 
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card px-4 pt-2.5 pb-2">
-              {/* Two columns: left stack (title + timestamp + numbers) | right gauge */}
+            {/* Tight top & bottom padding per Jig. Title hugs the top, numbers
+                hug the divider. Timestamp joined to title as inline suffix. */}
+            <div className="glass-card px-4 pt-1.5 pb-1.5">
               <div className="flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-[14px] font-semibold text-white leading-tight">Stress วันนี้</p>
-                  {updatedLabel && (
-                    <p className={`text-[10px] leading-tight mt-0.5 ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
-                      อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
-                    </p>
-                  )}
-                  {/* Numbers distribute across the full left-column width */}
+                  {/* Title + timestamp on the SAME LINE */}
+                  <p className="leading-tight">
+                    <span className="text-[14px] font-semibold text-white">Stress วันนี้</span>
+                    {updatedLabel && (
+                      <span className={`text-[10px] ml-1.5 ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
+                        · อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
+                      </span>
+                    )}
+                  </p>
                   <div className="flex justify-between mt-2 pr-2">
                     <div>
                       <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
@@ -701,7 +701,7 @@ export default function Home() {
               </div>
 
               {(s.weekly_avg !== null || s.cv !== null) && (
-                <div className="mt-1.5 pt-1.5 border-t border-white/5 space-y-0.5 text-[11px]">
+                <div className="mt-1 pt-1 border-t border-white/5 space-y-0.5 text-[11px]">
                   {s.weekly_avg !== null && (
                     <div className="flex items-baseline justify-between">
                       <span className="text-white/50">สัปดาห์นี้ avg</span>
