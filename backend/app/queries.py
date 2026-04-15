@@ -31,19 +31,28 @@ class HealthStore:
 
     # ---- public queries ---------------------------------------------------
 
-    def daily_hrv(self, days: int = 90) -> list[dict[str, Any]]:
-        """Nightly HRV — Whoop uses the last HRV reading during sleep, but
-        Apple samples HRV sporadically (usually during Breathe/sleep). We
-        take the daily median as a robust proxy."""
+    def daily_hrv(self, days: int = 90, morning_only: bool = True) -> list[dict[str, Any]]:
+        """Daily HRV aggregated per day.
+
+        morning_only=True (default, Altini gold): filter to pre-10am readings
+        only. Apple Watch logs most HRV during sleep / immediately after wake —
+        these are the readings that reflect autonomic readiness, uncontaminated
+        by daytime stress / caffeine / walking. This is what Whoop/Oura/Bevel
+        all report as "today's HRV." Used for Recovery.
+
+        morning_only=False: all readings across the day. Used for Stress, which
+        WANTS the post-workout / post-meal drops to land in the number.
+        """
         if not self._exists("hrv_sdnn"):
             return []
+        hour_clause = " AND EXTRACT(hour FROM start) < 10" if morning_only else ""
         sql = f"""
             SELECT
                 CAST(start AS DATE) AS day,
                 median(value) AS hrv_ms,
                 count(*) AS n
             FROM read_parquet('{self._path("hrv_sdnn")}')
-            WHERE start >= current_date - INTERVAL {days} DAY
+            WHERE start >= current_date - INTERVAL {days} DAY{hour_clause}
             GROUP BY 1
             ORDER BY 1
         """

@@ -27,8 +27,8 @@ from app.readiness import (
     compute_readiness,
 )
 
-hrv_val, hrv_base = _get_today_hrv(user_dir)
-rhr_val, rhr_base = _get_today_rhr(user_dir)
+hrv_val, hrv_base, _hrv_std = _get_today_hrv(user_dir)
+rhr_val, rhr_base, _rhr_std = _get_today_rhr(user_dir)
 prev_steps = _get_prev_steps(user_dir)
 streak = _get_gym_streak(user_dir)
 sleep_data = _get_sleep(user_dir)

@@ -27,16 +27,29 @@ def _query(parquet_dir: Path, sql: str) -> list:
     return con.execute(sql).fetchall()
 
 
-def _get_today_hrv(parquet_dir: Path, target: date | None = None) -> tuple[float | None, float | None]:
-    """Return (overnight_hrv, baseline_hrv).
+def _baseline_stats(prior: list[float]) -> tuple[float | None, float | None]:
+    """Return (mean, std) from a prior-days list, or (None, None) if <7 points."""
+    if len(prior) < 7:
+        return None, None
+    m = sum(prior) / len(prior)
+    var = sum((x - m) ** 2 for x in prior) / len(prior)
+    s = var ** 0.5 or 1.0
+    return m, s
+
+
+def _get_today_hrv(parquet_dir: Path, target: date | None = None) -> tuple[float | None, float | None, float | None]:
+    """Return (today_hrv, baseline_mean, baseline_std).
 
     Clinical standard (Whoop/Oura/Bevel): overnight HRV only — filter to
     early morning hours (before 10am) when Apple Watch logs most resting
     readings post-sleep. Daytime spikes (stress/walking/coffee) are excluded.
+
+    Returning std alongside mean lets callers compute proper z-scores
+    (Altini's recommended approach) instead of naive percentage deltas.
     """
     p = parquet_dir / "hrv_sdnn.parquet"
     if not p.exists():
-        return None, None
+        return None, None, None
     rows = _query(parquet_dir, f"""
         SELECT CAST(start AS DATE) AS d, avg(value) AS v
         FROM read_parquet('{p.as_posix()}')
@@ -45,20 +58,20 @@ def _get_today_hrv(parquet_dir: Path, target: date | None = None) -> tuple[float
         GROUP BY 1 ORDER BY 1
     """)
     if not rows:
-        return None, None
+        return None, None, None
     by_day = {r[0]: float(r[1]) for r in rows}
     d = target or date.today()
     today_val = by_day.get(d)
     prior = [v for dd, v in by_day.items() if dd < d and (d - dd).days <= 60]
-    baseline = sum(prior) / len(prior) if len(prior) >= 7 else None
-    return today_val, baseline
+    mean, std = _baseline_stats(prior)
+    return today_val, mean, std
 
 
-def _get_today_rhr(parquet_dir: Path, target: date | None = None) -> tuple[float | None, float | None]:
-    """Return (today_rhr, baseline_rhr)."""
+def _get_today_rhr(parquet_dir: Path, target: date | None = None) -> tuple[float | None, float | None, float | None]:
+    """Return (today_rhr, baseline_mean, baseline_std)."""
     p = parquet_dir / "resting_heart_rate.parquet"
     if not p.exists():
-        return None, None
+        return None, None, None
     rows = _query(parquet_dir, f"""
         SELECT CAST(start AS DATE) AS d, avg(value) AS v
         FROM read_parquet('{p.as_posix()}')
@@ -66,13 +79,13 @@ def _get_today_rhr(parquet_dir: Path, target: date | None = None) -> tuple[float
         GROUP BY 1 ORDER BY 1
     """)
     if not rows:
-        return None, None
+        return None, None, None
     by_day = {r[0]: float(r[1]) for r in rows}
     d = target or date.today()
     today_val = by_day.get(d)
     prior = [v for dd, v in by_day.items() if dd < d and (d - dd).days <= 60]
-    baseline = sum(prior) / len(prior) if len(prior) >= 7 else None
-    return today_val, baseline
+    mean, std = _baseline_stats(prior)
+    return today_val, mean, std
 
 
 def _get_prev_steps(parquet_dir: Path) -> float | None:
@@ -754,8 +767,8 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
     _target_date_override = target_date
 
     # Gather signals
-    hrv_val, hrv_base = _get_today_hrv(parquet_dir, today)
-    rhr_val, rhr_base = _get_today_rhr(parquet_dir, today)
+    hrv_val, hrv_base, hrv_std = _get_today_hrv(parquet_dir, today)
+    rhr_val, rhr_base, rhr_std = _get_today_rhr(parquet_dir, today)
     prev_steps = _get_prev_steps(parquet_dir)
     streak = _get_gym_streak(parquet_dir)
     sleep_data = _get_sleep(parquet_dir)
@@ -819,19 +832,41 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         label = "ควรพัก"
         color = "red"
 
-    # Recovery — calculate from same signals as readiness (HRV + RHR + Sleep only)
-    def _pct(val: float | None, base: float | None, invert: bool = False) -> int | None:
-        if val is None or base is None:
-            return None
-        diff = (val - base) / base if not invert else (base - val) / base
-        return max(0, min(100, round(50 + diff * 200)))
+    # Recovery — Altini-style z-score mapping, aligned with recovery.py:
+    #   Map z-score to 0..1 (cap at ±2σ) → weighted by HRV 0.55 / RHR 0.25 / Sleep 0.20.
+    # Previously used a naive linear %-diff which diverged from compute_recovery_series
+    # (debug_recovery.py output). Unified on the Altini path as single source of truth.
+    from .recovery import _zscore_to_unit, W_HRV, W_RHR, W_SLEEP, SLEEP_TARGET_MIN
 
-    hrv_pct = _pct(hrv_val, hrv_base)
-    rhr_pct = _pct(rhr_val, rhr_base, invert=True)
-    sleep_pct = min(100, round((sleep_hours / 8) * 100)) if sleep_hours else None
+    hrv_score: float | None = None
+    rhr_score: float | None = None
+    sleep_score: float | None = None
 
-    recovery_parts = [p for p in [hrv_pct, rhr_pct, sleep_pct] if p is not None]
-    recovery_score = round(sum(recovery_parts) / len(recovery_parts)) if recovery_parts else None
+    if hrv_val is not None and hrv_base is not None and hrv_std:
+        hrv_score = _zscore_to_unit((hrv_val - hrv_base) / hrv_std)
+
+    if rhr_val is not None and rhr_base is not None and rhr_std:
+        # Lower RHR is better → invert sign.
+        rhr_score = _zscore_to_unit((rhr_base - rhr_val) / rhr_std)
+
+    if sleep_hours is not None:
+        sleep_score = min(1.0, (sleep_hours * 60) / SLEEP_TARGET_MIN)
+
+    # Weighted combine, re-normalizing if a component is missing.
+    parts: list[tuple[float, float]] = []
+    if hrv_score is not None:   parts.append((hrv_score, W_HRV))
+    if rhr_score is not None:   parts.append((rhr_score, W_RHR))
+    if sleep_score is not None: parts.append((sleep_score, W_SLEEP))
+
+    recovery_score: int | None = None
+    if parts:
+        total_w = sum(w for _, w in parts)
+        recovery_score = round(100 * sum(s * w for s, w in parts) / total_w)
+
+    # Keep UI-facing component scores as 0-100 (same scale as recovery_score)
+    hrv_pct = round(hrv_score * 100) if hrv_score is not None else None
+    rhr_pct = round(rhr_score * 100) if rhr_score is not None else None
+    sleep_pct = round(sleep_score * 100) if sleep_score is not None else None
 
     # Strain decay: morning signals can say "well recovered" yet the user
     # is depleted by afternoon after heavy training. Recovery is a PHYSIOLOGICAL
