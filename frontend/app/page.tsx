@@ -636,16 +636,15 @@ export default function Home() {
         };
         const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
 
-        // Gauge sized to match LEFT STACK height (title + timestamp + numbers
-        // + labels = ~95px). Smaller gauge leaves empty space above/below
-        // which Jig flagged with red boxes. 96px gauge with 12px padding
-        // ≈ left stack 90-95px — no dead space on either side.
-        const gaugeSize = 96;
+        // Gauge bumped up (110px) per Jig's ask. Numbers use justify-between
+        // instead of fixed gap — they now spread evenly across the left
+        // column width instead of clustering at the start.
+        const gaugeSize = 110;
 
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
             <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card px-4 py-2.5">
+            <div className="glass-card px-4 pt-2.5 pb-2">
               {/* Two columns: left stack (title + timestamp + numbers) | right gauge */}
               <div className="flex items-center gap-3">
                 <div className="flex-1 min-w-0">
@@ -655,7 +654,8 @@ export default function Home() {
                       อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
                     </p>
                   )}
-                  <div className="flex gap-5 mt-1.5">
+                  {/* Numbers distribute across the full left-column width */}
+                  <div className="flex justify-between mt-2 pr-2">
                     <div>
                       <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
                         {s.highest ?? '—'}
@@ -701,7 +701,7 @@ export default function Home() {
               </div>
 
               {(s.weekly_avg !== null || s.cv !== null) && (
-                <div className="mt-2 pt-1.5 border-t border-white/5 space-y-0.5 text-[11px]">
+                <div className="mt-1.5 pt-1.5 border-t border-white/5 space-y-0.5 text-[11px]">
                   {s.weekly_avg !== null && (
                     <div className="flex items-baseline justify-between">
                       <span className="text-white/50">สัปดาห์นี้ avg</span>
