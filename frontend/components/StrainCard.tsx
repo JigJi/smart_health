@@ -10,19 +10,19 @@ export default function StrainCard({
   workouts: { type: string; duration_min: number; kcal: number }[];
 }) {
   const WORKOUT_NAMES: Record<string, string> = {
-    TraditionalStrengthTraining: 'เวท',
+    TraditionalStrengthTraining: 'Strength',
     FunctionalStrengthTraining: 'Functional',
-    Elliptical: 'เครื่องเดิน',
-    Cycling: 'ปั่นจักรยาน',
-    Boxing: 'มวย',
+    Elliptical: 'Elliptical',
+    Cycling: 'Cycling',
+    Boxing: 'Boxing',
     CoreTraining: 'Core',
-    HIIT: 'HIIT',
-    CardioDance: 'เต้น',
-    Walking: 'เดิน',
-    Running: 'วิ่ง',
-    Yoga: 'โยคะ',
-    Swimming: 'ว่ายน้ำ',
-    TableTennis: 'ปิงปอง',
+    HighIntensityIntervalTraining: 'HIIT',
+    CardioDance: 'Dance',
+    Walking: 'Walk',
+    Running: 'Run',
+    Yoga: 'Yoga',
+    Swimming: 'Swim',
+    TableTennis: 'Table Tennis',
   };
 
   if (workouts.length === 0 && activeKcal === 0) return null;

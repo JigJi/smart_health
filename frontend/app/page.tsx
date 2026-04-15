@@ -211,11 +211,11 @@ const WK_ICON: Record<string, string> = {
 
 /* ─── Workout names ─── */
 const WK: Record<string, string> = {
-  TraditionalStrengthTraining: 'เวท', FunctionalStrengthTraining: 'Functional',
-  Elliptical: 'เครื่องเดิน', Cycling: 'ปั่นจักรยาน', Boxing: 'มวย',
-  CoreTraining: 'Core', HIIT: 'HIIT', CardioDance: 'เต้น',
-  Walking: 'เดิน', Running: 'วิ่ง', Yoga: 'โยคะ',
-  Swimming: 'ว่ายน้ำ', TableTennis: 'ปิงปอง',
+  TraditionalStrengthTraining: 'Strength', FunctionalStrengthTraining: 'Functional',
+  Elliptical: 'Elliptical', Cycling: 'Cycling', Boxing: 'Boxing',
+  CoreTraining: 'Core', HighIntensityIntervalTraining: 'HIIT', CardioDance: 'Dance',
+  Walking: 'Walk', Running: 'Run', Yoga: 'Yoga',
+  Swimming: 'Swim', TableTennis: 'Table Tennis',
 };
 
 /* ─── Main page ─── */
