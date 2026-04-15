@@ -65,29 +65,99 @@ class HealthStore:
 
     def daily_sleep(self, days: int = 90) -> list[dict[str, Any]]:
         """Sleep summary per night. Apple labels each interval as one of:
-        InBed, AsleepCore, AsleepDeep, AsleepREM, Awake, Asleep (old API).
-        We sum durations and attribute the night to the wake-up date."""
+        InBed, AsleepCore, AsleepDeep, AsleepREM, Awake, AsleepUnspecified
+        (legacy, pre-iOS 16).
+
+        Two data-quality hazards handled here:
+
+        1. Multiple sources (iPhone auto-detect, Apple Watch, 3rd-party apps)
+           each write overlapping AsleepUnspecified intervals for the same
+           night. Naive SUM double/triple-counts → "23.9 hr" type bugs.
+
+        2. Modern nights (iOS 16+) have proper Core/Deep/REM stages. These
+           are authoritative — any AsleepUnspecified on the same night is
+           redundant coverage from another source and must be ignored.
+
+        Strategy, per night:
+          - If night has any modern stage (Core/Deep/REM): trust those only,
+            drop AsleepUnspecified to prevent double-count.
+          - Else (legacy / pre-iOS 16 night): take AsleepUnspecified and
+            MERGE overlapping intervals (classic gaps-and-islands) before
+            summing, so duplicate coverage from multiple sources collapses.
+
+        Awake minutes come from Awake stage directly (rare in legacy data).
+        """
         if not self._exists("sleep"):
             return []
         sql = f"""
-            WITH intervals AS (
+            WITH raw AS (
               SELECT
                 CAST("end" AS DATE) AS wake_day,
                 stage,
-                EXTRACT(EPOCH FROM ("end" - start)) / 60.0 AS minutes
+                start,
+                "end"
               FROM read_parquet('{self._path("sleep")}')
               WHERE "end" >= current_date - INTERVAL {days} DAY
+            ),
+            night_flag AS (
+              SELECT wake_day,
+                     MAX(CASE WHEN stage LIKE '%AsleepCore%'
+                               OR stage LIKE '%AsleepDeep%'
+                               OR stage LIKE '%AsleepREM%'
+                              THEN 1 ELSE 0 END) AS has_modern
+              FROM raw GROUP BY 1
+            ),
+            -- Modern-night path: sum stage durations directly (Apple Watch single source)
+            modern AS (
+              SELECT
+                r.wake_day AS day,
+                SUM(CASE WHEN stage LIKE '%AsleepCore%' OR stage LIKE '%AsleepDeep%' OR stage LIKE '%AsleepREM%'
+                         THEN EXTRACT(EPOCH FROM (r."end" - r.start))/60.0 ELSE 0 END) AS asleep_min,
+                SUM(CASE WHEN stage LIKE '%AsleepDeep%' THEN EXTRACT(EPOCH FROM (r."end" - r.start))/60.0 ELSE 0 END) AS deep_min,
+                SUM(CASE WHEN stage LIKE '%AsleepREM%'  THEN EXTRACT(EPOCH FROM (r."end" - r.start))/60.0 ELSE 0 END) AS rem_min,
+                SUM(CASE WHEN stage LIKE '%AsleepCore%' THEN EXTRACT(EPOCH FROM (r."end" - r.start))/60.0 ELSE 0 END) AS core_min,
+                SUM(CASE WHEN stage LIKE '%Awake%'      THEN EXTRACT(EPOCH FROM (r."end" - r.start))/60.0 ELSE 0 END) AS awake_min
+              FROM raw r JOIN night_flag nf USING (wake_day)
+              WHERE nf.has_modern = 1
+              GROUP BY r.wake_day
+            ),
+            -- Legacy-night path: only AsleepUnspecified (or old Asleep) intervals,
+            -- then interval-merge to collapse overlapping coverage.
+            legacy_raw AS (
+              SELECT r.wake_day, r.start, r."end"
+              FROM raw r JOIN night_flag nf USING (wake_day)
+              WHERE nf.has_modern = 0 AND r.stage LIKE '%Asleep%'
+            ),
+            legacy_ordered AS (
+              SELECT wake_day, start, "end",
+                     MAX("end") OVER (
+                       PARTITION BY wake_day ORDER BY start
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                     ) AS prev_max_end
+              FROM legacy_raw
+            ),
+            legacy_grouped AS (
+              SELECT wake_day, start, "end",
+                     SUM(CASE WHEN prev_max_end IS NULL OR start > prev_max_end THEN 1 ELSE 0 END)
+                       OVER (PARTITION BY wake_day ORDER BY start) AS island
+              FROM legacy_ordered
+            ),
+            legacy_islands AS (
+              SELECT wake_day, MIN(start) AS s, MAX("end") AS e
+              FROM legacy_grouped
+              GROUP BY wake_day, island
+            ),
+            legacy AS (
+              SELECT wake_day AS day,
+                     SUM(EXTRACT(EPOCH FROM (e - s))/60.0) AS asleep_min,
+                     0.0 AS deep_min, 0.0 AS rem_min, 0.0 AS core_min, 0.0 AS awake_min
+              FROM legacy_islands
+              GROUP BY wake_day
             )
-            SELECT
-              wake_day AS day,
-              SUM(CASE WHEN stage LIKE '%Asleep%' THEN minutes ELSE 0 END) AS asleep_min,
-              SUM(CASE WHEN stage LIKE '%Deep%'   THEN minutes ELSE 0 END) AS deep_min,
-              SUM(CASE WHEN stage LIKE '%REM%'    THEN minutes ELSE 0 END) AS rem_min,
-              SUM(CASE WHEN stage LIKE '%Core%'   THEN minutes ELSE 0 END) AS core_min,
-              SUM(CASE WHEN stage LIKE '%Awake%'  THEN minutes ELSE 0 END) AS awake_min
-            FROM intervals
-            GROUP BY 1
-            ORDER BY 1
+            SELECT * FROM modern
+            UNION ALL
+            SELECT * FROM legacy
+            ORDER BY day
         """
         return self.con.execute(sql).fetchdf().to_dict("records")
 

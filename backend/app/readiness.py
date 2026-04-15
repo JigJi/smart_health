@@ -170,25 +170,83 @@ def _get_today_strain(parquet_dir: Path) -> dict[str, Any]:
 
 
 def _get_sleep(parquet_dir: Path) -> dict[str, Any]:
-    """Last night's sleep summary."""
+    """Last night's sleep summary.
+
+    Same data-quality handling as queries.daily_sleep:
+    - If this night has modern stages (Core/Deep/REM from iOS 16+ Watch),
+      trust those; ignore AsleepUnspecified from other sources to avoid
+      double-counting overlapping coverage.
+    - Else (legacy night, pre-iOS 16 data): take AsleepUnspecified and
+      merge overlapping intervals before summing.
+
+    bedtime/wakeup use the full sleep window (any asleep-ish stage) so
+    legacy nights still get sensible anchor times.
+    """
     p = parquet_dir / "sleep.parquet"
     if not p.exists():
         return {"hours": None, "quality_label": "ไม่มีข้อมูล"}
 
-    # Look at sleep that ended today (last night's sleep)
-    # Filter to only sleep sessions between 8pm yesterday and 2pm today
-    rows = _query(parquet_dir, f"""
-        SELECT
-            min(start) AS bedtime,
-            max("end") AS wakeup,
-            SUM(CASE WHEN (stage LIKE '%AsleepCore%' OR stage LIKE '%AsleepDeep%'
-                          OR stage LIKE '%AsleepREM%') THEN
-                EXTRACT(EPOCH FROM ("end" - start)) / 3600.0 ELSE 0 END) AS hours
-        FROM read_parquet('{p.as_posix()}')
-        WHERE CAST("end" AS DATE) = current_date
-          AND start >= current_date - INTERVAL 1 DAY + INTERVAL 20 HOUR
-          AND "end" <= current_date + INTERVAL 14 HOUR
+    path = p.as_posix()
+    window_clause = f"""
+        "end" >= current_date - INTERVAL 1 DAY + INTERVAL 20 HOUR
+        AND "end" <= current_date + INTERVAL 14 HOUR
+        AND CAST("end" AS DATE) = current_date
+    """
+
+    # Does this night have any modern stage?
+    flag_rows = _query(parquet_dir, f"""
+        SELECT MAX(CASE WHEN stage LIKE '%AsleepCore%'
+                         OR stage LIKE '%AsleepDeep%'
+                         OR stage LIKE '%AsleepREM%'
+                        THEN 1 ELSE 0 END) AS has_modern
+        FROM read_parquet('{path}')
+        WHERE {window_clause}
     """)
+    has_modern = bool(flag_rows and flag_rows[0][0] == 1)
+
+    if has_modern:
+        # Strict modern-only sum
+        rows = _query(parquet_dir, f"""
+            SELECT
+                min(start) AS bedtime,
+                max("end") AS wakeup,
+                SUM(CASE WHEN stage LIKE '%AsleepCore%'
+                          OR stage LIKE '%AsleepDeep%'
+                          OR stage LIKE '%AsleepREM%'
+                         THEN EXTRACT(EPOCH FROM ("end" - start)) / 3600.0
+                         ELSE 0 END) AS hours
+            FROM read_parquet('{path}')
+            WHERE {window_clause}
+        """)
+    else:
+        # Legacy: interval-merge AsleepUnspecified to collapse duplicate coverage
+        rows = _query(parquet_dir, f"""
+            WITH legacy AS (
+              SELECT start, "end"
+              FROM read_parquet('{path}')
+              WHERE {window_clause} AND stage LIKE '%Asleep%'
+            ),
+            ordered AS (
+              SELECT start, "end",
+                     MAX("end") OVER (ORDER BY start
+                                      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_end
+              FROM legacy
+            ),
+            islands AS (
+              SELECT start, "end",
+                     SUM(CASE WHEN prev_end IS NULL OR start > prev_end THEN 1 ELSE 0 END)
+                       OVER (ORDER BY start) AS grp
+              FROM ordered
+            ),
+            merged AS (
+              SELECT MIN(start) AS s, MAX("end") AS e
+              FROM islands GROUP BY grp
+            )
+            SELECT MIN(s) AS bedtime,
+                   MAX(e) AS wakeup,
+                   SUM(EXTRACT(EPOCH FROM (e - s)) / 3600.0) AS hours
+            FROM merged
+        """)
 
     if not rows or rows[0][2] is None or float(rows[0][2]) == 0:
         return {"hours": None, "quality_label": "ไม่มีข้อมูล"}
