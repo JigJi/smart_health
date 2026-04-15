@@ -232,21 +232,21 @@ export default function Home() {
   const [showCal, setShowCal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | undefined>();
   const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [showTips, setShowTips] = useState(false);
 
-  const loadDay = (date?: string, silent = false) => {
-    if (!silent) setLoading(true);
+  // All loads are silent — the UI shows previous data while new data fetches
+  // in the background, then swaps in when ready. No blocking overlay anywhere
+  // except the very first cold-start render (no cache + no response yet).
+  const loadDay = (date?: string) => {
     api.today(date).then(d => {
       setData(d);
-      setLoading(false);
       // Persist "today" payload for next session's first paint (SWR pattern).
       // Skip when a specific date was requested — only the default "today" view
       // is what users land on first, so that's the only one worth caching.
       if (!date) {
         try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch {}
       }
-    }).catch(() => { setError(true); setLoading(false); });
+    }).catch(() => setError(true));
   };
 
   const loadCalendar = (y: number, m: number) => {
@@ -275,14 +275,14 @@ export default function Home() {
       const cached = localStorage.getItem(CACHE_KEY);
       if (cached) setData(JSON.parse(cached));
     } catch {}
-    loadDay(undefined, true);  // silent — no blocking spinner
+    loadDay();
     loadCalendar(calYear, calMonth);
   }, []);
 
   // Expose silent refresh for native shell (iOS WebView) to call after sync
   useEffect(() => {
     (window as any).__refreshData = () => {
-      loadDay(selectedDate, true);           // silent — no "กำลังโหลด..." overlay
+      loadDay(selectedDate);
       loadCalendar(calYear, calMonth);
     };
   });
@@ -308,13 +308,6 @@ export default function Home() {
     <main className="min-h-screen pb-16 relative" style={{
       background: '#141414',
     }}>
-      {/* Loading overlay */}
-      {loading && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="text-white/80 text-2xl">กำลังโหลด...</div>
-        </div>
-      )}
-
       {/* Header */}
       <header className="px-6 pt-4 pb-3 animate-fade-up">
         <button onClick={() => setShowCal(!showCal)} className="flex items-center gap-2 w-full">
