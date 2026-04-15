@@ -173,3 +173,115 @@ def detect_episodes(store: HealthStore, days: int = 365 * 6) -> dict[str, Any]:
         "episodes": [asdict(e) for e in episodes],
         "flags": flags,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Real-time illness watcher — focused on TODAY, for dashboard alerts.
+# Complements detect_episodes() (historical) with a sharper Altini-style
+# multi-signal rule: ≥2 signals = meaningful; sustained = high confidence.
+# ─────────────────────────────────────────────────────────────────────
+
+from pathlib import Path
+from statistics import mean, pstdev
+
+import duckdb
+
+
+def _daily_series(parquet_dir: Path, file: str, days: int,
+                  morning_only: bool = False) -> dict[date, float]:
+    p = parquet_dir / file
+    if not p.exists():
+        return {}
+    con = duckdb.connect(":memory:")
+    con.execute("SET TimeZone='Asia/Bangkok'")
+    where = f"CAST(start AS DATE) >= current_date - INTERVAL {days} DAY"
+    if morning_only:
+        where += " AND EXTRACT(hour FROM start) < 10"
+    rows = con.execute(f"""
+        SELECT CAST(start AS DATE) AS d, avg(value) AS v
+        FROM read_parquet('{p.as_posix()}')
+        WHERE {where}
+        GROUP BY 1
+    """).fetchall()
+    return {r[0]: float(r[1]) for r in rows if r[1] is not None}
+
+
+def _day_zscore(val: float | None, series: dict[date, float], target: date) -> float | None:
+    if val is None:
+        return None
+    base = [v for dd, v in series.items() if dd < target and (target - dd).days <= 60]
+    if len(base) < 7:
+        return None
+    m = mean(base)
+    s = pstdev(base) or 1.0
+    return (val - m) / s
+
+
+def _check_day_signals(parquet_dir: Path, d: date,
+                       hrv: dict, rhr: dict, temp: dict) -> list[dict[str, Any]]:
+    """Return list of signal dicts that fired on day `d`."""
+    signals: list[dict[str, Any]] = []
+
+    hrv_z = _day_zscore(hrv.get(d), hrv, d)
+    if hrv_z is not None and hrv_z <= -1.5:
+        signals.append({"metric": "HRV", "z": round(hrv_z, 1),
+                        "msg": f"HRV ต่ำกว่าปกติ ({hrv_z:+.1f}σ)"})
+
+    rhr_z = _day_zscore(rhr.get(d), rhr, d)
+    if rhr_z is not None and rhr_z >= 1.5:
+        signals.append({"metric": "RHR", "z": round(rhr_z, 1),
+                        "msg": f"RHR สูงกว่าปกติ ({rhr_z:+.1f}σ)"})
+
+    # Wrist temp — absolute °C delta vs baseline (not z-score; Apple's
+    # post-iOS 16 temp is calibrated to show Δ directly)
+    temp_val = temp.get(d)
+    if temp_val is not None:
+        temp_base = [v for dd, v in temp.items() if dd < d and (d - dd).days <= 60]
+        if len(temp_base) >= 7:
+            delta = temp_val - mean(temp_base)
+            if delta >= 0.5:
+                signals.append({"metric": "temp", "delta": round(delta, 2),
+                                "msg": f"อุณหภูมิข้อมือสูง (+{delta:.1f}°C)"})
+    return signals
+
+
+def detect_today(parquet_dir: Path, target: date | None = None) -> dict[str, Any]:
+    """Altini-style multi-signal illness watcher for dashboard.
+
+    Confidence tiers:
+      - high     : ≥2 signals AND yesterday also had ≥2 → sustained pattern
+      - medium   : ≥2 signals today only → watchful
+      - low      : 1 signal → could be coffee / bad sleep, not illness
+      - None     : all normal
+    """
+    d = target or date.today()
+    hrv  = _daily_series(parquet_dir, "hrv_sdnn.parquet", 90, morning_only=True)
+    rhr  = _daily_series(parquet_dir, "resting_heart_rate.parquet", 90)
+    temp = _daily_series(parquet_dir, "wrist_temperature.parquet", 90)
+
+    today_signals = _check_day_signals(parquet_dir, d, hrv, rhr, temp)
+    yest_signals  = _check_day_signals(parquet_dir, d - timedelta(days=1),
+                                        hrv, rhr, temp)
+
+    confidence: str | None = None
+    if len(today_signals) >= 2 and len(yest_signals) >= 2:
+        confidence = "high"
+    elif len(today_signals) >= 2:
+        confidence = "medium"
+    elif len(today_signals) >= 1:
+        confidence = "low"
+
+    headline: str | None = None
+    if confidence == "high":
+        headline = "สัญญาณป่วยต่อเนื่อง 2 วัน ควรพักจริงจัง"
+    elif confidence == "medium":
+        headline = "มีสัญญาณผิดปกติหลายตัว วันนี้ — เฝ้าดูอีก 24 ชม."
+    elif confidence == "low":
+        headline = "มีสัญญาณเดียวผิดปกติ อาจเป็น noise ไม่แน่ใจ"
+
+    return {
+        "confidence": confidence,
+        "headline": headline,
+        "signals": today_signals,
+        "sustained": len(yest_signals) >= 2,
+    }

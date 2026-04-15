@@ -138,6 +138,19 @@ export type TodayData = {
     rhr_score: number | null;
     sleep_score: number | null;
   };
+  stress: {
+    acute: number | null;          // today's stress 0-100
+    weekly_avg: number | null;     // 7-day avg stress 0-100
+    weekly_trend: number | null;   // signed pp change vs prior week
+    cv: number | null;             // 30d coefficient of variation %
+    stability: 'stable' | 'variable' | 'unstable' | 'ไม่มีข้อมูล';
+  };
+  illness: {
+    confidence: 'high' | 'medium' | 'low' | null;
+    headline: string | null;
+    signals: { metric: string; z?: number; delta?: number; msg: string }[];
+    sustained: boolean;
+  };
   tip: string;
   tips?: { category: string; headline: string; options: string[] }[];
   tips_personalized?: boolean;

@@ -455,6 +455,37 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Illness banner — only when confidence is medium or high.
+          Low = single noisy signal, not worth alarming.
+          Anti-engagement ok here: this IS the edge-case alert exception. */}
+      {data.illness && (data.illness.confidence === 'medium' || data.illness.confidence === 'high') && (
+        <div className="mx-5 mb-4 animate-fade-up animate-delay-2 rounded-[18px] p-4"
+          style={{
+            background: data.illness.confidence === 'high'
+              ? 'linear-gradient(135deg, rgba(255,69,58,0.12), rgba(255,69,58,0.04))'
+              : 'linear-gradient(135deg, rgba(255,159,10,0.10), rgba(255,159,10,0.04))',
+            border: `1px solid ${data.illness.confidence === 'high' ? 'rgba(255,69,58,0.35)' : 'rgba(255,159,10,0.3)'}`,
+          }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-base">{data.illness.confidence === 'high' ? '🛑' : '⚠️'}</span>
+            <span className="text-[12px] uppercase tracking-[0.15em] font-semibold"
+              style={{ color: data.illness.confidence === 'high' ? '#FF453A' : '#FF9F0A' }}>
+              สัญญาณร่างกาย
+            </span>
+          </div>
+          <p className="text-[15px] font-medium text-white mb-2">{data.illness.headline}</p>
+          <ul className="space-y-1 text-[13px] text-white/70">
+            {data.illness.signals.map((s, i) => (
+              <li key={i}>· {s.msg}</li>
+            ))}
+            {data.illness.sustained && (
+              <li className="text-white/80 italic">· ต่อเนื่องจากเมื่อวานแล้ว</li>
+            )}
+          </ul>
+        </div>
+      )}
+
       {/* AI Narration */}
       {data.reason && (() => {
         const ringColor = COLORS[data.color]?.ring || '#FF9F0A';
@@ -552,6 +583,65 @@ export default function Home() {
             status="normal" format={(v) => v.toLocaleString()} />
         </div>
       </div>
+
+      {/* Stress card — Altini-style (acute z-score + 7d trend + CV stability).
+          Hides entirely if no data — don't invent noise (feedback_empty_state_is_signal). */}
+      {data.stress && data.stress.acute !== null && (() => {
+        const s = data.stress;
+        const acuteColor = s.acute! >= 70 ? '#FF453A' : s.acute! >= 50 ? '#FF9F0A' : '#30D158';
+        const trendIcon = s.weekly_trend == null ? '' : s.weekly_trend > 3 ? '↑' : s.weekly_trend < -3 ? '↓' : '→';
+        const trendText = s.weekly_trend == null ? '' :
+          s.weekly_trend > 3 ? 'เพิ่มขึ้นจากสัปดาห์ก่อน' :
+          s.weekly_trend < -3 ? 'ลดลงจากสัปดาห์ก่อน' :
+          'คงที่';
+        const stabMap: Record<string, { label: string; color: string }> = {
+          stable:    { label: 'ระบบประสาทอัตโนมัติเสถียร', color: '#30D158' },
+          variable:  { label: 'ค่อนข้างแปรปรวน',          color: '#FF9F0A' },
+          unstable:  { label: 'ไม่เสถียร — เฝ้าระวัง',     color: '#FF453A' },
+          'ไม่มีข้อมูล':  { label: 'ข้อมูลไม่พอประเมิน',     color: '#888' },
+        };
+        const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
+
+        return (
+          <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
+            <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
+            <div className="glass-card p-4 space-y-3">
+              {/* Acute */}
+              <div className="flex items-baseline justify-between">
+                <span className="text-[13px] text-white/60">วันนี้</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-semibold tabular-nums" style={{ color: acuteColor }}>
+                    {s.acute}
+                  </span>
+                  <span className="text-[11px] text-white/40">%</span>
+                </div>
+              </div>
+
+              {/* Weekly */}
+              {s.weekly_avg !== null && (
+                <div className="flex items-baseline justify-between border-t border-white/5 pt-3">
+                  <span className="text-[13px] text-white/60">สัปดาห์นี้ avg</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-base font-medium text-white/90 tabular-nums">{s.weekly_avg}%</span>
+                    {trendIcon && <span className="text-[12px] text-white/50">{trendIcon} {trendText}</span>}
+                  </div>
+                </div>
+              )}
+
+              {/* Stability */}
+              {s.cv !== null && (
+                <div className="flex items-baseline justify-between border-t border-white/5 pt-3">
+                  <span className="text-[13px] text-white/60">ระบบประสาทอัตโนมัติ</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[13px]" style={{ color: stab.color }}>{stab.label}</span>
+                    <span className="text-[11px] text-white/30">CV {s.cv}%</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Timeline */}
       {data.strain.workouts.length > 0 && (

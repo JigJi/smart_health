@@ -847,6 +847,14 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
     already_worked_out = len(strain_data.get("workouts", [])) > 0
     tip = _generate_tip(score, streak, prev_steps, sleep_hours, dow, already_worked_out)
 
+    # Altini-style stress summary (acute / weekly trend / CV stability)
+    from .stress import compute_stress
+    stress_data = compute_stress(parquet_dir, today)
+
+    # Altini-style illness watcher — multi-signal anomaly for today
+    from .illness import detect_today as detect_illness_today
+    illness_data = detect_illness_today(parquet_dir, today)
+
     # Data-driven tips (active mode — user opts in by tapping to expand)
     tips = _compute_tips(
         parquet_dir,
@@ -855,6 +863,17 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         strain_data.get("workouts", []), streak,
         prev_steps,
     )
+
+    # Illness takes precedence — prepend as Rule 0 if confidence ≥ medium.
+    # Low confidence (single signal) stays silent to avoid false-alarm fatigue.
+    if illness_data.get("confidence") in ("medium", "high"):
+        illness_tip = {
+            "category": "illness",
+            "headline": illness_data["headline"],
+            "options": [s["msg"] for s in illness_data.get("signals", [])]
+                       + (["พบต่อเนื่อง 2 วัน"] if illness_data.get("sustained") else []),
+        }
+        tips = [illness_tip] + tips[:2]  # keep at most 3 total
     # Track whether tips are based on user's own history
     tips_personalized = any(t.get("category", "").endswith("_personal") for t in tips)
 
@@ -903,6 +922,8 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
             "rhr_score": rhr_pct,
             "sleep_score": sleep_pct,
         },
+        "stress": stress_data,
+        "illness": illness_data,
         "tip": tip,
         "tips": tips,
         "tips_personalized": tips_personalized,
