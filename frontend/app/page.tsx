@@ -584,13 +584,45 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Stress card — day-story framing (current/peak/avg + timeline chart).
-          Data freshness = last sync (throttled 5 min). Charts beat walls of
-          text but we deliberately avoid auto-refresh / live gauges that would
-          invite obsessive checking (anti-engagement). */}
+      {/* Stress card — Bevel-style: Highest/Lowest/Average numbers + gauge.
+          Dropped the line chart (per Jig's request to match Bevel exactly).
+          Anti-engagement framing still holds: gauge shows the day's picture,
+          not a live value that invites obsessive checking. */}
       {data.stress && data.stress.current !== null && (() => {
         const s = data.stress;
-        const color = (v: number) => v >= 70 ? '#FF453A' : v >= 50 ? '#FF9F0A' : '#30D158';
+
+        // Sample-level freshness (Apple Watch HRV is sparse ~5/day)
+        let updatedLabel = '';
+        let stale = false;
+        if (s.latest_sample_time) {
+          const d = new Date(s.latest_sample_time);
+          updatedLabel = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+          stale = (Date.now() - d.getTime()) / 60000 > 60;
+        }
+
+        // Gauge level label: Low / Med / High
+        const gaugeVal = s.current!;
+        const gaugeLabel = gaugeVal >= 70 ? 'High' : gaugeVal >= 40 ? 'Med' : 'Low';
+        const gaugeColor = gaugeVal >= 70 ? '#FF453A' : gaugeVal >= 40 ? '#FF9F0A' : '#30D158';
+
+        // Circular gauge SVG — 120×120, stroke arc 270° (like Bevel).
+        // Background ring: cyan-to-orange-to-red gradient (visual hint).
+        // Pointer dot: position based on gaugeVal.
+        const cx = 60, cy = 60, r = 46;
+        const startAngle = 135;   // bottom-left start
+        const endAngle = 45;      // bottom-right end (going clockwise over top)
+        const totalArc = 270;     // degrees
+        const valueAngle = startAngle + (gaugeVal / 100) * totalArc;
+        const toXY = (deg: number) => {
+          const rad = (deg * Math.PI) / 180;
+          return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+        };
+        const bgStart = toXY(startAngle);
+        const bgEnd = toXY(endAngle + 360);   // go around
+        const dot = toXY(valueAngle);
+        // Background track: full 270° arc
+        const bgArc = `M ${bgStart.x.toFixed(2)} ${bgStart.y.toFixed(2)} A ${r} ${r} 0 1 1 ${bgEnd.x.toFixed(2)} ${bgEnd.y.toFixed(2)}`;
+
         const trendIcon = s.weekly_trend == null ? '' : s.weekly_trend > 3 ? '↑' : s.weekly_trend < -3 ? '↓' : '→';
         const trendText = s.weekly_trend == null ? '' :
           s.weekly_trend > 3 ? 'เพิ่มขึ้นจากสัปดาห์ก่อน' :
@@ -604,110 +636,73 @@ export default function Home() {
         };
         const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
 
-        // Build chart path. Scale time to 0-100% width, stress to 0-100% height.
-        const tl = s.timeline || [];
-        const hasChart = tl.length >= 2;
-        let chartSvg: React.ReactNode = null;
-        if (hasChart) {
-          const times = tl.map(p => new Date(p.time).getTime());
-          const tMin = Math.min(...times);
-          const tMax = Math.max(...times);
-          const tRange = tMax - tMin || 1;
-          const W = 300, H = 60;
-          const points = tl.map(p => {
-            const x = ((new Date(p.time).getTime() - tMin) / tRange) * W;
-            const y = H - (p.stress / 100) * H;
-            return `${x.toFixed(1)},${y.toFixed(1)}`;
-          });
-          const area = `M 0,${H} L ${points.join(' L ')} L ${W},${H} Z`;
-          const line = `M ${points.join(' L ')}`;
-          chartSvg = (
-            <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="56" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="stressFill" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#FF9F0A" stopOpacity="0.35" />
-                  <stop offset="100%" stopColor="#FF9F0A" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path d={area} fill="url(#stressFill)" />
-              <path d={line} stroke="#FF9F0A" strokeWidth="1.5" fill="none" />
-            </svg>
-          );
-        }
-
-        // Format latest sample time + stale-detection.
-        // Apple Watch logs HRV sparsely (~5 samples/day, only during rest
-        // moments). If the most recent sample is >1h old, the "current"
-        // value is actually stale — tell the user honestly rather than
-        // pretending it's live.
-        let currentTimeLabel = '';
-        let currentStale = false;
-        if (s.latest_sample_time) {
-          const d = new Date(s.latest_sample_time);
-          currentTimeLabel = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-          const minutesAgo = (Date.now() - d.getTime()) / 60000;
-          currentStale = minutesAgo > 60;
-        }
-        let peakLabel = '';
-        if (s.peak_time) {
-          const d = new Date(s.peak_time);
-          peakLabel = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-        }
-
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
-            <div className="flex items-baseline justify-between mb-2 px-1">
-              <p className="text-[12px] uppercase tracking-[0.15em] text-white/30">Stress</p>
-              {currentTimeLabel && (
-                <span className={`text-[10px] ${currentStale ? 'text-amber-400/70' : 'text-white/25'}`}>
-                  ล่าสุด {currentTimeLabel}{currentStale ? ' · Watch ยังไม่วัดใหม่' : ''}
-                </span>
-              )}
-            </div>
+            <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
             <div className="glass-card p-4">
-              {/* Timeline chart */}
-              {hasChart ? (
-                <div className="mb-3 -mx-1">{chartSvg}</div>
-              ) : (
-                <p className="text-[11px] text-white/30 mb-3 text-center py-4">
-                  ข้อมูลวันนี้ยังน้อย — รอ HRV samples เพิ่ม
-                </p>
-              )}
-
-              {/* Current · Peak · Avg row.
-                  Label "ล่าสุด" not "ตอนนี้" — Apple Watch logs HRV sparsely
-                  so "current" is whenever the most recent rest-moment reading
-                  was, possibly hours ago. Color muted if >1h stale. */}
-              <div className="grid grid-cols-3 gap-2 pb-3 border-b border-white/5">
-                <div>
-                  <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">
-                    ล่าสุด {currentTimeLabel && <span className="text-white/25 normal-case tracking-normal">· {currentTimeLabel}</span>}
+              {/* Title row — "Today's stress" + "Last updated HH:MM" */}
+              <div className="mb-3">
+                <p className="text-[15px] font-semibold text-white">Stress วันนี้</p>
+                {updatedLabel && (
+                  <p className={`text-[11px] ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
+                    อัปเดตล่าสุด {updatedLabel}{stale ? ' · Watch ยังไม่วัดใหม่' : ''}
                   </p>
-                  <p className="text-xl font-semibold tabular-nums" style={{ color: currentStale ? '#888' : color(s.current!) }}>
-                    {s.current}<span className="text-[11px] font-normal text-white/40">%</span>
-                  </p>
-                </div>
-                {s.peak !== null && (
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">peak</p>
-                    <p className="text-xl font-semibold tabular-nums" style={{ color: color(s.peak) }}>
-                      {s.peak}<span className="text-[11px] font-normal text-white/40">%</span>
-                    </p>
-                    {peakLabel && <p className="text-[10px] text-white/30">{peakLabel}</p>}
-                  </div>
-                )}
-                {s.avg !== null && (
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">avg</p>
-                    <p className="text-xl font-semibold tabular-nums text-white/80">
-                      {s.avg}<span className="text-[11px] font-normal text-white/40">%</span>
-                    </p>
-                  </div>
                 )}
               </div>
 
-              {/* Weekly + stability (compact, 2 rows) */}
-              <div className="pt-3 space-y-1.5 text-[12px]">
+              {/* Bevel-style: left = 3 numbers, right = circular gauge */}
+              <div className="grid grid-cols-[1fr_auto] gap-4 items-center">
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
+                      {s.highest ?? '—'}
+                    </p>
+                    <p className="text-[11px] text-white/50 mt-1">Highest</p>
+                  </div>
+                  <div>
+                    <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#30D158' }}>
+                      {s.lowest ?? '—'}
+                    </p>
+                    <p className="text-[11px] text-white/50 mt-1">Lowest</p>
+                  </div>
+                  <div>
+                    <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF9F0A' }}>
+                      {s.avg ?? '—'}
+                    </p>
+                    <p className="text-[11px] text-white/50 mt-1">Average</p>
+                  </div>
+                </div>
+
+                {/* Gauge */}
+                <svg width="110" height="110" viewBox="0 0 120 120">
+                  <defs>
+                    <linearGradient id="gaugeGrad" x1="0" x2="1" y1="1" y2="0">
+                      <stop offset="0%"   stopColor="#30D158" />
+                      <stop offset="50%"  stopColor="#FF9F0A" />
+                      <stop offset="100%" stopColor="#FF453A" />
+                    </linearGradient>
+                  </defs>
+                  {/* Track background */}
+                  <path d={bgArc} stroke="rgba(255,255,255,0.08)" strokeWidth="8" fill="none" strokeLinecap="round" />
+                  {/* Colored gradient arc on top (same path, styled) */}
+                  <path d={bgArc} stroke="url(#gaugeGrad)" strokeWidth="8" fill="none" strokeLinecap="round" opacity="0.35" />
+                  {/* Pointer dot */}
+                  <circle cx={dot.x} cy={dot.y} r="5" fill={gaugeColor}
+                          stroke="#141414" strokeWidth="2" />
+                  {/* Center value */}
+                  <text x={cx} y={cy - 2} textAnchor="middle"
+                        fontSize="22" fontWeight="600" fill={stale ? '#888' : '#fff'}>
+                    {gaugeVal}
+                  </text>
+                  <text x={cx} y={cy + 16} textAnchor="middle"
+                        fontSize="10" fill="rgba(255,255,255,0.5)">
+                    {gaugeLabel}
+                  </text>
+                </svg>
+              </div>
+
+              {/* Weekly + stability (compact, below main view) */}
+              <div className="pt-3 mt-3 border-t border-white/5 space-y-1.5 text-[12px]">
                 {s.weekly_avg !== null && (
                   <div className="flex items-baseline justify-between">
                     <span className="text-white/50">สัปดาห์นี้ avg</span>

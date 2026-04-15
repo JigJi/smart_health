@@ -130,10 +130,13 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
     else:
         base_mean = base_std = None
 
-    # 1. Per-sample stress today: current (latest), peak (max), avg (mean)
-    #    Plus timeline for the UI chart. Pure HRV-derived — no strain boost.
+    # 1. Per-sample stress today — Bevel-style summary.
+    #    highest / lowest / average = what the UI shows as 3 numbers.
+    #    peak_time kept for the "at 10:30" hint on the highest value.
+    #    current (= latest sample) drives the gauge position.
     current = None
-    peak = None
+    highest = None
+    lowest = None
     peak_time: str | None = None
     avg = None
     timeline: list[dict[str, Any]] = []
@@ -148,13 +151,15 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
                 timeline.append({"time": t, "stress": s})
             stresses = [s for _, s in per_sample]
             current = per_sample[-1][1]
-            peak = max(stresses)
-            peak_time = next(t for t, s in per_sample if s == peak)
+            highest = max(stresses)
+            lowest = min(stresses)
+            peak_time = next(t for t, s in per_sample if s == highest)
             avg = round(mean(stresses))
             latest_sample_time = per_sample[-1][0]
 
-    # Acute = current (latest sample). Kept as field name for API stability.
+    # Acute / peak = backward-compat aliases for highest
     acute = current
+    peak = highest
 
     # 2. Weekly avg + trend (this 7d vs prior 7d)
     def _window_stress(start_offset: int, size: int = 7) -> float | None:
@@ -190,12 +195,14 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
                 stability = "unstable"
 
     return {
-        "acute": acute,                  # current = most recent sample (API stable)
-        "current": current,               # alias, explicit name
-        "peak": peak,                     # highest stress today
-        "peak_time": peak_time,           # ISO time of peak
+        "acute": acute,                  # backward-compat alias for current
+        "current": current,               # latest sample (drives gauge position)
+        "highest": highest,               # max stress today
+        "lowest": lowest,                 # min stress today
+        "peak": peak,                     # backward-compat alias for highest
+        "peak_time": peak_time,           # ISO time of highest moment
         "avg": avg,                       # mean stress today
-        "timeline": timeline,             # [{time, stress}] for UI chart
+        "timeline": timeline,             # [{time, stress}] — kept for any future chart need
         "latest_sample_time": latest_sample_time,  # freshness indicator
         "weekly_avg": weekly_avg,
         "weekly_trend": weekly_trend,    # signed pp (+5 = rising, -3 = calming)

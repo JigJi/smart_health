@@ -146,11 +146,13 @@ export type TodayData = {
   } | null;
   stress: {
     acute: number | null;                  // alias for current (API stable)
-    current: number | null;                 // most recent HRV sample's stress
-    peak: number | null;                    // highest stress today
-    peak_time: string | null;               // ISO time of peak
-    avg: number | null;                     // mean across today
-    timeline: { time: string; stress: number }[];  // per-sample for chart
+    current: number | null;                 // latest sample — drives gauge position
+    highest: number | null;                 // max stress today (Bevel's "Highest")
+    lowest: number | null;                  // min stress today (Bevel's "Lowest")
+    peak: number | null;                    // alias for highest
+    peak_time: string | null;               // ISO time of highest moment
+    avg: number | null;                     // mean across today (Bevel's "Average")
+    timeline: { time: string; stress: number }[];
     latest_sample_time: string | null;      // freshness indicator
     weekly_avg: number | null;
     weekly_trend: number | null;
