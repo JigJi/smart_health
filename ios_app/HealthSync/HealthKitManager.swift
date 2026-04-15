@@ -26,9 +26,12 @@ class HealthKitManager: ObservableObject {
     @Published var backfillProgress: Double = 0.0
     @Published var backfillStatus = ""
 
-    // Sync throttle — don't re-sync if we synced less than this ago
+    // Sync throttle — don't re-sync if we synced less than this ago.
+    // 5 min: short enough that opening the app shows near-live HRV/stress,
+    // long enough to prevent rapid-fire sync from scenePhase flapping
+    // (open/close/open within seconds won't spam the backend or HealthKit).
     private var lastSyncAt: Date?
-    private let syncMinInterval: TimeInterval = 3600  // 1 hour
+    private let syncMinInterval: TimeInterval = 300   // 5 minutes
 
     // Request permission for ALL types we might ever use — ask once, never prompt again.
     // เหตุผล: ถ้าเพิ่ม type ใหม่ภายหลัง iOS จะต้องขอใหม่ ผู้ใช้จะรู้สึกรำคาญ

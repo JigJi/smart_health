@@ -60,6 +60,29 @@ def _all_day_hrv_by_day(parquet_dir: Path, days: int = 120) -> dict[date, float]
     return {r[0]: float(r[1]) for r in rows if r[1] is not None}
 
 
+def _hrv_samples_for_day(parquet_dir: Path, d: date) -> list[tuple[str, float]]:
+    """Return list of (iso_time, hrv_ms) for all HRV samples on day `d`.
+
+    Used to compute per-moment stress throughout the day so the UI can
+    show a timeline instead of a single number. Apple Watch logs HRV
+    sporadically (5-10 per day typically), so the timeline is sparse —
+    callers should handle low-sample cases gracefully.
+    """
+    p = parquet_dir / "hrv_sdnn.parquet"
+    if not p.exists():
+        return []
+    con = duckdb.connect(":memory:")
+    con.execute("SET TimeZone='Asia/Bangkok'")
+    rows = con.execute(f"""
+        SELECT start, value
+        FROM read_parquet('{p.as_posix()}')
+        WHERE CAST(start AS DATE) = DATE '{d.isoformat()}'
+        ORDER BY start
+    """).fetchall()
+    return [(r[0].isoformat() if hasattr(r[0], 'isoformat') else str(r[0]),
+             float(r[1])) for r in rows if r[1] is not None]
+
+
 def _stress_from_hrv(hrv_val: float, base_mean: float, base_std: float) -> int:
     """z=0 → 50 (normal), z=-2 → 100 (max stress), z=+2 → 0 (calm).
 
@@ -71,28 +94,27 @@ def _stress_from_hrv(hrv_val: float, base_mean: float, base_std: float) -> int:
     return max(0, min(100, round(50 - z * 25)))
 
 
-def _strain_boost(today_kcal: float | None) -> int:
-    """Today's completed workout load adds to felt stress.
-
-    Morning HRV alone can't tell you "you're tired from your gym session" —
-    that's a physical load signal, not autonomic. A heavy training day with
-    great morning signals should still register as elevated stress because
-    the body IS depleted, even if it woke up recovered.
-
-    0 kcal → 0 boost, 500 kcal → +20, 1000+ kcal → +40 (capped).
-    """
-    if not today_kcal:
-        return 0
-    return round(min(40, today_kcal / 1000 * 40))
-
-
 def compute_stress(parquet_dir: Path, target: date | None = None,
                    today_kcal: float | None = None) -> dict[str, Any]:
-    """Stress summary. Autonomic (HRV z-score) + physical load (today's kcal).
+    """Stress summary — Bevel-style day-story, not a live gauge.
 
-    Caller passes today_kcal from strain_data so we don't re-query parquet.
+    Computes per-sample stress from HRV readings today, then summarizes:
+      - current: most recent sample (fresh when app syncs)
+      - peak:    highest stress moment today (usually during workout)
+      - avg:     mean across today
+      - timeline: list of {time, stress} for UI chart
+
+    No physical-load boost here (that's a separate axis already shown as
+    "ความเหนื่อยล้า"). Stress is pure autonomic / HRV-derived.
+
+    today_kcal param kept for signature stability but unused — remove
+    on next pass if no caller needs it. (Strain-boost approach double-
+    counted with the strain metric and was explicitly rejected by Jig
+    after seeing the scary 78% number it produced on a restful evening.)
+
     Returns partial dict when data sparse.
     """
+    _ = today_kcal  # intentionally unused; kept for backward-compat
     d = target or date.today()
     hrv_by_day = _all_day_hrv_by_day(parquet_dir, days=120)
     if not hrv_by_day:
@@ -108,12 +130,31 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
     else:
         base_mean = base_std = None
 
-    # 1. Acute stress today = autonomic (HRV z-score) + physical (today's strain)
-    today_hrv = hrv_by_day.get(d)
-    acute = None
-    if today_hrv is not None and base_mean is not None:
-        autonomic = _stress_from_hrv(today_hrv, base_mean, base_std)
-        acute = min(100, autonomic + _strain_boost(today_kcal))
+    # 1. Per-sample stress today: current (latest), peak (max), avg (mean)
+    #    Plus timeline for the UI chart. Pure HRV-derived — no strain boost.
+    current = None
+    peak = None
+    peak_time: str | None = None
+    avg = None
+    timeline: list[dict[str, Any]] = []
+    latest_sample_time: str | None = None
+    if base_mean is not None:
+        samples = _hrv_samples_for_day(parquet_dir, d)
+        if samples:
+            per_sample = []
+            for t, v in samples:
+                s = _stress_from_hrv(v, base_mean, base_std)
+                per_sample.append((t, s))
+                timeline.append({"time": t, "stress": s})
+            stresses = [s for _, s in per_sample]
+            current = per_sample[-1][1]
+            peak = max(stresses)
+            peak_time = next(t for t, s in per_sample if s == peak)
+            avg = round(mean(stresses))
+            latest_sample_time = per_sample[-1][0]
+
+    # Acute = current (latest sample). Kept as field name for API stability.
+    acute = current
 
     # 2. Weekly avg + trend (this 7d vs prior 7d)
     def _window_stress(start_offset: int, size: int = 7) -> float | None:
@@ -149,7 +190,13 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
                 stability = "unstable"
 
     return {
-        "acute": acute,
+        "acute": acute,                  # current = most recent sample (API stable)
+        "current": current,               # alias, explicit name
+        "peak": peak,                     # highest stress today
+        "peak_time": peak_time,           # ISO time of peak
+        "avg": avg,                       # mean stress today
+        "timeline": timeline,             # [{time, stress}] for UI chart
+        "latest_sample_time": latest_sample_time,  # freshness indicator
         "weekly_avg": weekly_avg,
         "weekly_trend": weekly_trend,    # signed pp (+5 = rising, -3 = calming)
         "cv": cv,                        # % — lower is more stable

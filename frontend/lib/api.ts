@@ -145,10 +145,16 @@ export type TodayData = {
     wakeup: string | null;
   } | null;
   stress: {
-    acute: number | null;          // today's stress 0-100
-    weekly_avg: number | null;     // 7-day avg stress 0-100
-    weekly_trend: number | null;   // signed pp change vs prior week
-    cv: number | null;             // 30d coefficient of variation %
+    acute: number | null;                  // alias for current (API stable)
+    current: number | null;                 // most recent HRV sample's stress
+    peak: number | null;                    // highest stress today
+    peak_time: string | null;               // ISO time of peak
+    avg: number | null;                     // mean across today
+    timeline: { time: string; stress: number }[];  // per-sample for chart
+    latest_sample_time: string | null;      // freshness indicator
+    weekly_avg: number | null;
+    weekly_trend: number | null;
+    cv: number | null;
     stability: 'stable' | 'variable' | 'unstable' | 'ไม่มีข้อมูล';
   };
   illness: {

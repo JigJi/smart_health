@@ -584,60 +584,132 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Stress card — Altini-style (acute z-score + 7d trend + CV stability).
-          Hides entirely if no data — don't invent noise (feedback_empty_state_is_signal). */}
-      {data.stress && data.stress.acute !== null && (() => {
+      {/* Stress card — day-story framing (current/peak/avg + timeline chart).
+          Data freshness = last sync (throttled 5 min). Charts beat walls of
+          text but we deliberately avoid auto-refresh / live gauges that would
+          invite obsessive checking (anti-engagement). */}
+      {data.stress && data.stress.current !== null && (() => {
         const s = data.stress;
-        const acuteColor = s.acute! >= 70 ? '#FF453A' : s.acute! >= 50 ? '#FF9F0A' : '#30D158';
+        const color = (v: number) => v >= 70 ? '#FF453A' : v >= 50 ? '#FF9F0A' : '#30D158';
         const trendIcon = s.weekly_trend == null ? '' : s.weekly_trend > 3 ? '↑' : s.weekly_trend < -3 ? '↓' : '→';
         const trendText = s.weekly_trend == null ? '' :
           s.weekly_trend > 3 ? 'เพิ่มขึ้นจากสัปดาห์ก่อน' :
           s.weekly_trend < -3 ? 'ลดลงจากสัปดาห์ก่อน' :
           'คงที่';
         const stabMap: Record<string, { label: string; color: string }> = {
-          stable:    { label: 'ระบบประสาทอัตโนมัติเสถียร', color: '#30D158' },
-          variable:  { label: 'ค่อนข้างแปรปรวน',          color: '#FF9F0A' },
-          unstable:  { label: 'ไม่เสถียร — เฝ้าระวัง',     color: '#FF453A' },
-          'ไม่มีข้อมูล':  { label: 'ข้อมูลไม่พอประเมิน',     color: '#888' },
+          stable:    { label: 'เสถียร',          color: '#30D158' },
+          variable:  { label: 'ค่อนข้างแปรปรวน',  color: '#FF9F0A' },
+          unstable:  { label: 'ไม่เสถียร',        color: '#FF453A' },
+          'ไม่มีข้อมูล':  { label: 'ข้อมูลไม่พอ',    color: '#888' },
         };
         const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
 
+        // Build chart path. Scale time to 0-100% width, stress to 0-100% height.
+        const tl = s.timeline || [];
+        const hasChart = tl.length >= 2;
+        let chartSvg: React.ReactNode = null;
+        if (hasChart) {
+          const times = tl.map(p => new Date(p.time).getTime());
+          const tMin = Math.min(...times);
+          const tMax = Math.max(...times);
+          const tRange = tMax - tMin || 1;
+          const W = 300, H = 60;
+          const points = tl.map(p => {
+            const x = ((new Date(p.time).getTime() - tMin) / tRange) * W;
+            const y = H - (p.stress / 100) * H;
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+          });
+          const area = `M 0,${H} L ${points.join(' L ')} L ${W},${H} Z`;
+          const line = `M ${points.join(' L ')}`;
+          chartSvg = (
+            <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="56" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="stressFill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#FF9F0A" stopOpacity="0.35" />
+                  <stop offset="100%" stopColor="#FF9F0A" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <path d={area} fill="url(#stressFill)" />
+              <path d={line} stroke="#FF9F0A" strokeWidth="1.5" fill="none" />
+            </svg>
+          );
+        }
+
+        // Format latest sample freshness — "อัปเดต 14:32"
+        let fresh = '';
+        if (s.latest_sample_time) {
+          const d = new Date(s.latest_sample_time);
+          fresh = `อัปเดต ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+        let peakLabel = '';
+        if (s.peak_time) {
+          const d = new Date(s.peak_time);
+          peakLabel = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+
         return (
           <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
-            <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card p-4 space-y-3">
-              {/* Acute */}
-              <div className="flex items-baseline justify-between">
-                <span className="text-[13px] text-white/60">วันนี้</span>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-semibold tabular-nums" style={{ color: acuteColor }}>
-                    {s.acute}
-                  </span>
-                  <span className="text-[11px] text-white/40">%</span>
+            <div className="flex items-baseline justify-between mb-2 px-1">
+              <p className="text-[12px] uppercase tracking-[0.15em] text-white/30">Stress</p>
+              {fresh && <span className="text-[10px] text-white/25">{fresh}</span>}
+            </div>
+            <div className="glass-card p-4">
+              {/* Timeline chart */}
+              {hasChart ? (
+                <div className="mb-3 -mx-1">{chartSvg}</div>
+              ) : (
+                <p className="text-[11px] text-white/30 mb-3 text-center py-4">
+                  ข้อมูลวันนี้ยังน้อย — รอ HRV samples เพิ่ม
+                </p>
+              )}
+
+              {/* Current · Peak · Avg row */}
+              <div className="grid grid-cols-3 gap-2 pb-3 border-b border-white/5">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">ตอนนี้</p>
+                  <p className="text-xl font-semibold tabular-nums" style={{ color: color(s.current!) }}>
+                    {s.current}<span className="text-[11px] font-normal text-white/40">%</span>
+                  </p>
                 </div>
+                {s.peak !== null && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">peak</p>
+                    <p className="text-xl font-semibold tabular-nums" style={{ color: color(s.peak) }}>
+                      {s.peak}<span className="text-[11px] font-normal text-white/40">%</span>
+                    </p>
+                    {peakLabel && <p className="text-[10px] text-white/30">{peakLabel}</p>}
+                  </div>
+                )}
+                {s.avg !== null && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">avg</p>
+                    <p className="text-xl font-semibold tabular-nums text-white/80">
+                      {s.avg}<span className="text-[11px] font-normal text-white/40">%</span>
+                    </p>
+                  </div>
+                )}
               </div>
 
-              {/* Weekly */}
-              {s.weekly_avg !== null && (
-                <div className="flex items-baseline justify-between border-t border-white/5 pt-3">
-                  <span className="text-[13px] text-white/60">สัปดาห์นี้ avg</span>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-base font-medium text-white/90 tabular-nums">{s.weekly_avg}%</span>
-                    {trendIcon && <span className="text-[12px] text-white/50">{trendIcon} {trendText}</span>}
+              {/* Weekly + stability (compact, 2 rows) */}
+              <div className="pt-3 space-y-1.5 text-[12px]">
+                {s.weekly_avg !== null && (
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-white/50">สัปดาห์นี้ avg</span>
+                    <span className="text-white/80 tabular-nums">
+                      {s.weekly_avg}% <span className="text-white/40">{trendIcon} {trendText}</span>
+                    </span>
                   </div>
-                </div>
-              )}
-
-              {/* Stability */}
-              {s.cv !== null && (
-                <div className="flex items-baseline justify-between border-t border-white/5 pt-3">
-                  <span className="text-[13px] text-white/60">ระบบประสาทอัตโนมัติ</span>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[13px]" style={{ color: stab.color }}>{stab.label}</span>
-                    <span className="text-[11px] text-white/30">CV {s.cv}%</span>
+                )}
+                {s.cv !== null && (
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-white/50">ระบบประสาทอัตโนมัติ</span>
+                    <span className="tabular-nums">
+                      <span style={{ color: stab.color }}>{stab.label}</span>
+                      <span className="text-white/30"> · CV {s.cv}%</span>
+                    </span>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         );
