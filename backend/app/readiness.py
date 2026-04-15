@@ -727,10 +727,20 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         elif hour == 0 and int(bedtime.split(":")[1]) >= 30:
             score -= 5
 
-    # Already worked out that day — reduce readiness
+    # Already worked out that day — reduce readiness proportional to intensity.
+    # Flat -10 was unfair: a 100-kcal walk shouldn't cost the same as a
+    # 700-kcal weights+cardio session. Smooth linear gradient (per memory
+    # feedback_no_threshold_cliffs): 0 kcal → -5, 500 kcal → -15, 1000+ kcal → -25.
     if strain_data.get("workouts"):
-        score -= 10
-        extra_reasons.append("ออกกำลังกายไปแล้ว")
+        today_kcal = strain_data.get("active_kcal", 0) or 0
+        penalty = min(25, 5 + today_kcal * 0.02)
+        score -= round(penalty)
+        if today_kcal >= 500:
+            extra_reasons.append(f"ออกกำลังหนักแล้ววันนี้ ({today_kcal:.0f} kcal)")
+        elif today_kcal >= 200:
+            extra_reasons.append(f"ออกกำลังไปแล้ววันนี้ ({today_kcal:.0f} kcal)")
+        else:
+            extra_reasons.append("ออกกำลังเบาๆ ไปแล้ววันนี้")
 
     if extra_reasons:
         reason = reason + " · " + " · ".join(extra_reasons) if reason != "ร่างกายปกติดี" else " · ".join(extra_reasons)
@@ -764,6 +774,16 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
 
     recovery_parts = [p for p in [hrv_pct, rhr_pct, sleep_pct] if p is not None]
     recovery_score = round(sum(recovery_parts) / len(recovery_parts)) if recovery_parts else None
+
+    # Strain decay: morning signals can say "well recovered" yet the user
+    # is depleted by afternoon after heavy training. Recovery is a PHYSIOLOGICAL
+    # state, not a morning forecast — if the body has done work since waking,
+    # the score must reflect that. Smooth decay up to 30%: 0 kcal → 0%,
+    # 500 kcal → 15%, 1000+ kcal → 30% (capped).
+    if recovery_score is not None and strain_data.get("workouts"):
+        today_kcal = strain_data.get("active_kcal", 0) or 0
+        decay_pct = min(0.30, today_kcal / 1000 * 0.30)
+        recovery_score = round(recovery_score * (1 - decay_pct))
 
     # Tip
     already_worked_out = len(strain_data.get("workouts", [])) > 0
