@@ -2,9 +2,13 @@
 
 Three views, each answering a different question:
 
-  1. ACUTE (today)       — How stressed is the body today? Single-day
-                           z-score of morning HRV vs 60-day baseline.
-                           Inverted so high value = high stress.
+  1. ACUTE (today)       — How stressed is the body RIGHT NOW?
+                           z-score of today's all-day HRV average vs
+                           personal 60-day all-day baseline. Inverted so
+                           high value = high stress. Uses all-day (not
+                           morning-only) because stress reflects current
+                           physiological state — post-workout HRV drops
+                           should show up, which morning-only would miss.
 
   2. WEEKLY AVG + TREND  — Is stress rising or falling over the week?
                            7-day moving average compared to the prior
@@ -17,10 +21,14 @@ Three views, each answering a different question:
                            a chronic stress / overtraining flag that a
                            single z-score doesn't catch.
 
-All three use morning-only HRV (hour < 10, post-sleep) per Altini's
-recommendation to filter daytime noise. Needs ≥7 days of morning
-readings for baseline; ≤ that returns partial / None values so the UI
-can render "ข้อมูลไม่พอ" rather than show garbage.
+Split from Recovery on purpose:
+  Recovery uses MORNING HRV (Altini gold — post-sleep readiness signal,
+  doesn't change through the day; afternoon decay comes from strain).
+  Stress uses ALL-DAY HRV (includes post-meal / post-workout drops —
+  reflects current autonomic state, which is what "stress" means to users).
+
+Needs ≥7 days of baseline; less than that returns partial / None values
+so the UI can render "ข้อมูลไม่พอ" rather than show garbage.
 """
 from __future__ import annotations
 
@@ -32,8 +40,12 @@ from typing import Any
 import duckdb
 
 
-def _morning_hrv_by_day(parquet_dir: Path, days: int = 120) -> dict[date, float]:
-    """Return {day: avg_hrv_ms} using pre-10am readings only."""
+def _all_day_hrv_by_day(parquet_dir: Path, days: int = 120) -> dict[date, float]:
+    """Return {day: avg_hrv_ms} using ALL readings across the day.
+
+    Stress wants current-state signal — post-workout / post-coffee HRV
+    drops must land in the number. Morning-only filter would mask those.
+    """
     p = parquet_dir / "hrv_sdnn.parquet"
     if not p.exists():
         return {}
@@ -43,7 +55,6 @@ def _morning_hrv_by_day(parquet_dir: Path, days: int = 120) -> dict[date, float]
         SELECT CAST(start AS DATE) AS d, avg(value) AS v
         FROM read_parquet('{p.as_posix()}')
         WHERE CAST(start AS DATE) >= current_date - INTERVAL {days} DAY
-          AND EXTRACT(hour FROM start) < 10
         GROUP BY 1
     """).fetchall()
     return {r[0]: float(r[1]) for r in rows if r[1] is not None}
@@ -63,7 +74,7 @@ def _stress_from_hrv(hrv_val: float, base_mean: float, base_std: float) -> int:
 def compute_stress(parquet_dir: Path, target: date | None = None) -> dict[str, Any]:
     """Altini-style stress summary. Returns partial dict when data sparse."""
     d = target or date.today()
-    hrv_by_day = _morning_hrv_by_day(parquet_dir, days=120)
+    hrv_by_day = _all_day_hrv_by_day(parquet_dir, days=120)
     if not hrv_by_day:
         return {"acute": None, "weekly_avg": None, "weekly_trend": None,
                 "cv": None, "stability": "ไม่มีข้อมูล"}
