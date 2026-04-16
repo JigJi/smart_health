@@ -678,12 +678,13 @@ export default function Home() {
           if (cur.length > 0) segments.push(cur);
         }
 
-        // For each segment, build a smooth bezier line + area-fill path.
+        // For each segment, build a smooth bezier line. Bevel-style: no
+        // area fill (Jig: "เอาออกดีกว่า Bevel เขาก็ไม่มี") — just the line.
         const segmentPaths = segments.map(seg => {
           const pts = seg.map(p => ({ x: xForHour(p.hour + 0.5), y: yToSvg(p.stress) }));
-          if (pts.length === 0) return { line: '', area: '' };
+          if (pts.length === 0) return { line: '' };
           if (pts.length === 1) {
-            return { line: `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`, area: '' };
+            return { line: `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}` };
           }
           let line = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
           for (let i = 1; i < pts.length - 1; i++) {
@@ -695,9 +696,7 @@ export default function Home() {
           }
           const last = pts[pts.length - 1];
           line += ` T ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
-          const area = `${line} L ${last.x.toFixed(1)} ${yToSvg(0).toFixed(1)} ` +
-                       `L ${pts[0].x.toFixed(1)} ${yToSvg(0).toFixed(1)} Z`;
-          return { line, area };
+          return { line };
         });
 
         // Sleep band — cycle_start → wakeup, mapped to hour x-positions.
@@ -809,11 +808,6 @@ export default function Home() {
                     <stop offset="50%" stopColor="#FF9F0A" />
                     <stop offset="100%" stopColor="#30D158" />
                   </linearGradient>
-                  <linearGradient id="stressAreaGrad" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%"  stopColor="#FF453A" stopOpacity="0.20" />
-                    <stop offset="50%" stopColor="#FF9F0A" stopOpacity="0.12" />
-                    <stop offset="100%" stopColor="#30D158" stopOpacity="0.04" />
-                  </linearGradient>
                 </defs>
 
                 {/* Y-axis grid lines at 25/50/75 (subtle reference) */}
@@ -823,12 +817,7 @@ export default function Home() {
                         stroke="rgba(255,255,255,0.05)" strokeDasharray="2,3" />
                 ))}
 
-                {/* Area fills — one per data segment (gaps stay empty) */}
-                {segmentPaths.map((sp, i) => sp.area && (
-                  <path key={`a${i}`} d={sp.area} fill="url(#stressAreaGrad)" />
-                ))}
-
-                {/* Sleep band — overlays area fill so it stays visible */}
+                {/* Sleep band */}
                 {sleepBand && sleepBand.w > 0 && (
                   <rect x={sleepBand.x} y={padT} width={sleepBand.w} height={innerH}
                         fill="rgba(100,140,220,0.16)" rx="2" />
