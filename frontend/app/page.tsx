@@ -717,37 +717,40 @@ export default function Home() {
         // Workout markers — Bevel-style 🏋️ icon above the chart at each
         // workout's start time. `time` from backend is "HH:MM" so we
         // combine with the cycle's calendar day to build a datetime.
-        // Two workouts close in time (back-to-back gym session: e.g.,
-        // weights + treadmill) used to render two overlapping 🏋️ icons.
-        // Merge any markers whose duration bands overlap or are within
-        // 12px of each other — gym sessions read as one logical block.
-        const rawWorkoutMarkers: { x: number; w: number }[] = [];
-        for (const w of (data.strain?.workouts || [])) {
-          if (!w.time) continue;
-          const [hh, mm] = w.time.split(':').map(Number);
-          if (Number.isNaN(hh)) continue;
-          const wDt = new Date(cycleStart);
-          wDt.setHours(hh, mm || 0, 0, 0);
-          if (wDt < cycleStart) wDt.setDate(wDt.getDate() + 1);
-          const wHours = (wDt.getTime() - cycleStart.getTime()) / 3600_000;
-          if (wHours < 0 || wHours > TOTAL_HOURS) continue;
-          const wEndHours = Math.min(TOTAL_HOURS, wHours + (w.duration_min || 30) / 60);
-          rawWorkoutMarkers.push({
-            x: xForHour(wHours),
-            w: xForHour(wEndHours) - xForHour(wHours),
-          });
-        }
-        rawWorkoutMarkers.sort((a, b) => a.x - b.x);
-        const workoutMarkers: { x: number; w: number }[] = [];
-        for (const wm of rawWorkoutMarkers) {
-          const last = workoutMarkers[workoutMarkers.length - 1];
-          if (last && wm.x <= last.x + last.w + 12) {
-            // Overlap or near — extend the previous block
-            last.w = Math.max(last.x + last.w, wm.x + wm.w) - last.x;
+        // Merge workouts whose end-to-start gap is within MERGE_GAP_H —
+        // two morning workouts back-to-back (e.g., weights then yoga
+        // within 1h) read as one "session." Workouts >1h apart stay
+        // as separate blocks. Time-based threshold (not pixel-based)
+        // so it survives chart-width changes.
+        const MERGE_GAP_H = 1;
+        const rawWorkouts = (data.strain?.workouts || [])
+          .map(w => {
+            if (!w.time) return null;
+            const [hh, mm] = w.time.split(':').map(Number);
+            if (Number.isNaN(hh)) return null;
+            const wDt = new Date(cycleStart);
+            wDt.setHours(hh, mm || 0, 0, 0);
+            if (wDt < cycleStart) wDt.setDate(wDt.getDate() + 1);
+            const startH = (wDt.getTime() - cycleStart.getTime()) / 3600_000;
+            if (startH < 0 || startH > TOTAL_HOURS) return null;
+            const endH = Math.min(TOTAL_HOURS, startH + (w.duration_min || 30) / 60);
+            return { startH, endH };
+          })
+          .filter((w): w is { startH: number; endH: number } => w !== null)
+          .sort((a, b) => a.startH - b.startH);
+        const mergedSessions: { startH: number; endH: number }[] = [];
+        for (const w of rawWorkouts) {
+          const last = mergedSessions[mergedSessions.length - 1];
+          if (last && w.startH <= last.endH + MERGE_GAP_H) {
+            last.endH = Math.max(last.endH, w.endH);
           } else {
-            workoutMarkers.push({ x: wm.x, w: wm.w });
+            mergedSessions.push({ startH: w.startH, endH: w.endH });
           }
         }
+        const workoutMarkers = mergedSessions.map(s => ({
+          x: xForHour(s.startH),
+          w: xForHour(s.endH) - xForHour(s.startH),
+        }));
 
         // Time-axis labels every 4h (per Jig's "4 8 12") — round clock
         // hours within the 24h cycle window. With cycle_start typically
