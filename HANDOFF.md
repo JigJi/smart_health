@@ -4,6 +4,61 @@
 
 ---
 
+## 🚀 Deploy รอบล่าสุด — 2026-04-16 (Stress card overhaul + iOS sync fix)
+
+### สิ่งใหม่ที่ commit แล้ว (2 commits, push ไป origin/main แล้ว)
+
+**Commit 1 — `iOS: kill the sync-delay`** (`a95493a`)
+- iOS `HealthKitManager.swift`: throttle 5min → 30s; explicit user actions force=true
+- Background HealthKit delivery `.hourly` → `.immediate`
+- ⚠️ **ต้อง Xcode rebuild** บน Mac (เสียบ iPhone) — ไฟล์ Swift ทำงานบนเครื่องเท่านั้น
+
+**Commit 2 — `Stress card: chart-as-hero`** (`ff4227f`)
+- Backend `stress.py`: เปลี่ยน per-sample timeline จาก HRV-derived (sparse 5/วัน) → **HR-derived** (dense ~6 นาที, Bevel-faithful)
+- 24h cycle anchor ที่ user's bedtime (ไม่ใช่เที่ยงคืน) — `cycle_start` ใน payload
+- เพิ่ม `latest_hr_sample_time` field (watch-worn detection)
+- Frontend: redesign Stress card ทั้งหมด — ตัด 3 numbers + circular gauge ออก ใช้ smooth bezier line + sleep band 🌙 + workout markers 🏋️ + gap-break (ตามที่ Bevel ทำ)
+- Mock support: `?mock=1` ที่ `/api/today` ส่ง synthetic data สำหรับ iterate UI
+
+### วิธี deploy บน Windows
+
+```bash
+# 1. SSH/RDP ไป Windows server
+cd path/to/smart_health
+git pull origin main
+
+# 2. Restart backend service (uvicorn)
+nssm restart smart_health_backend
+# หรือถ้ายังไม่ได้เป็น service: kill process แล้วรัน start_backend.bat ใหม่
+
+# 3. Rebuild + restart frontend (เพราะ page.tsx เปลี่ยนเยอะ)
+cd frontend
+npm run build
+nssm restart smart_health_frontend
+# หรือ kill + รัน start_frontend.bat
+
+# 4. Verify
+curl https://voizely-backend.tailb8d083.ts.net:10000/today \
+  -H "X-User-Id: 64CAFB5C-3965-49DF-BFAE-401BD8D7722D" \
+  | python -c "import json,sys; d=json.load(sys.stdin); s=d['stress']; print('cycle_start:', s.get('cycle_start')); print('timeline_count:', len(s.get('timeline',[])))"
+# → ควรเห็น cycle_start มี timezone +07:00 และ timeline_count > 0 (ถ้ามี HR ในวัน)
+
+# 5. iPhone refresh (pull-to-refresh หรือเปิดแอพใหม่)
+```
+
+### Mock data — ทดสอบ chart โดยไม่ต้องมี HR data จริง
+
+```
+http://localhost:3400?mock=1   (หรือ public URL)
+```
+ส่ง synthetic 24h timeline (sleep block, workout spike เช้า, mid-day gap, evening, current = "now") — useful ตอน parquet stale
+
+### Known gotcha
+- `frontend/.env.local` ที่ Mac ตั้ง `BACKEND_URL=https://voizely-backend...:10000` (= Windows prod) — ถ้าจะ test Mac frontend → Mac backend ต้อง toggle ไป `http://localhost:8401` แล้ว restart Next.js (`.env.local` ไม่ hot-reload). อย่า commit Mac local URL.
+- iOS Phase B (sync delay fix) **ยังไม่ deploy บน iPhone** — ต้อง Xcode rebuild แยก
+
+---
+
 ## Context ย่อ
 
 Smart_health = แพลตฟอร์มวิเคราะห์สุขภาพจาก Apple Watch ทำ 3 ส่วน:
