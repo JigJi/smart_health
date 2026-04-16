@@ -890,6 +890,7 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
     stress_data = compute_stress(
         parquet_dir, today,
         today_kcal=strain_data.get("active_kcal"),
+        bedtime=sleep_data.get("bedtime"),
     )
 
     # Altini-style illness watcher — multi-signal anomaly for today

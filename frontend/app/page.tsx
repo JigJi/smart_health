@@ -565,6 +565,306 @@ export default function Home() {
         </div>
       )}
 
+      {/* Stress card — chart-as-hero (Bevel-style today's stress chart).
+          Dropped: 3 numbers (Highest/Lowest/Average) and circular gauge.
+          Per Jig: "min max avg ผมเฉยๆ ดูจากกราฟก็ได้". The chart conveys
+          everything at a glance — trend, peaks, sleep band, and the
+          rightmost point shows current/last state.
+          Anti-engagement framing intact: chart is a day-story, not a
+          live gauge inviting obsessive refreshing. */}
+      {data.stress && (() => {
+        const s = data.stress;
+        // Empty-day flag — no stress samples at all (e.g., watch wasn't
+        // worn that day). Card still renders so user knows the day was
+        // measured, but chart and value show "no data" instead of being
+        // silently hidden (which left users wondering "ทำไมไม่มีอะไร?").
+        const noData = s.current === null;
+
+        // Live-day check — stale/watch-off detection only applies when
+        // viewing TODAY. For past-date views (calendar pick), the data
+        // is historical fact: "ไม่ได้สวมนาฬิกา" makes no sense for a
+        // day 2 days ago, and the last sample is just the day's last
+        // reading (not "stale"). Comparing past samples to `Date.now()`
+        // would always trigger stale/watchOff, hiding the chart dot
+        // and labeling every history view as "watch off."
+        // Use LOCAL date (not UTC) — `data.date` is set by backend in
+        // local time, and toISOString() in early-morning Bangkok would
+        // return yesterday's UTC date, breaking the comparison.
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const isLive = data.date === todayStr;
+
+        // Sample-level freshness — only meaningful for live view.
+        let updatedLabel = '';
+        let stale = false;
+        if (s.latest_sample_time) {
+          const d = new Date(s.latest_sample_time);
+          updatedLabel = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+          stale = isLive && (Date.now() - d.getTime()) / 60000 > 60;
+        }
+
+        // Watch-worn detection — uses HR (dense ~every 6 min when worn),
+        // not HRV (sparse ~every 1-3 hr). >30 min stale HR = watch off.
+        // Skip entirely for past-date views (see isLive above).
+        const watchOff = (() => {
+          if (!isLive) return false;
+          if (!s.latest_hr_sample_time) return true;
+          const d = new Date(s.latest_hr_sample_time);
+          return (Date.now() - d.getTime()) / 60000 > 30;
+        })();
+        const lastHrLabel = s.latest_hr_sample_time
+          ? (() => {
+              const d = new Date(s.latest_hr_sample_time);
+              return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            })()
+          : null;
+
+        // Chart geometry — smooth gradient line, hourly aggregation.
+        // Per Jig: line chart with color was the right call (bars rejected).
+        // Hourly aggregation (vs per-sample 175 pts) keeps the line smooth
+        // and Bevel-like without per-sample noise. X-axis auto-scales to
+        // the data range so the line always fills the chart width.
+        const chartW = 320, chartH = 70;
+        const padL = 6, padR = 14, padT = 5, padB = 14;
+        const innerW = chartW - padL - padR;
+        const innerH = chartH - padT - padB;
+        const yToSvg = (stress: number) => padT + (1 - stress / 100) * innerH;
+
+        // cycle_start anchors x=0. Fall back to yesterday-22:00.
+        const cycleStart = s.cycle_start
+          ? new Date(s.cycle_start)
+          : (() => {
+              const d = new Date();
+              d.setHours(22, 0, 0, 0);
+              d.setDate(d.getDate() - 1);
+              return d;
+            })();
+        const minsFromCycleStart = (iso: string) => {
+          const d = new Date(iso);
+          return (d.getTime() - cycleStart.getTime()) / 60000;
+        };
+
+        // X-axis LOCKED to 24h cycle (per Jig "สาบานว่าครบ 24 ชม.").
+        const TOTAL_HOURS = 24;
+        const xForHour = (h: number) => padL + (h / TOTAL_HOURS) * innerW;
+
+        // Hourly aggregation — average stress per hour-from-cycle-start.
+        // Per Jig (multiple times): "ทำเป็น hourly ก็พอ ทำไมต้องถี่ๆๆ"
+        // — per-sample (175 pts) was too noisy. 24 buckets, smooth line.
+        const hourlyBuckets: { sum: number; count: number }[] =
+          Array.from({ length: TOTAL_HOURS }, () => ({ sum: 0, count: 0 }));
+        for (const pt of (s.timeline || [])) {
+          const m = minsFromCycleStart(pt.time);
+          if (m < 0 || m >= TOTAL_HOURS * 60) continue;
+          const h = Math.floor(m / 60);
+          hourlyBuckets[h].sum += pt.stress;
+          hourlyBuckets[h].count++;
+        }
+
+        // Break into segments at empty hours — Bevel leaves visible
+        // gaps when the watch was off (see user's IMG_1013/1014). Each
+        // segment = a run of consecutive hours that have data.
+        const segments: { hour: number; stress: number }[][] = [];
+        {
+          let cur: { hour: number; stress: number }[] = [];
+          for (let h = 0; h < TOTAL_HOURS; h++) {
+            if (hourlyBuckets[h].count > 0) {
+              cur.push({ hour: h, stress: Math.round(hourlyBuckets[h].sum / hourlyBuckets[h].count) });
+            } else if (cur.length > 0) {
+              segments.push(cur);
+              cur = [];
+            }
+          }
+          if (cur.length > 0) segments.push(cur);
+        }
+
+        // For each segment, build a smooth bezier line + area-fill path.
+        const segmentPaths = segments.map(seg => {
+          const pts = seg.map(p => ({ x: xForHour(p.hour + 0.5), y: yToSvg(p.stress) }));
+          if (pts.length === 0) return { line: '', area: '' };
+          if (pts.length === 1) {
+            return { line: `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`, area: '' };
+          }
+          let line = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+          for (let i = 1; i < pts.length - 1; i++) {
+            const cur = pts[i];
+            const next = pts[i + 1];
+            const midX = (cur.x + next.x) / 2;
+            const midY = (cur.y + next.y) / 2;
+            line += ` Q ${cur.x.toFixed(1)} ${cur.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
+          }
+          const last = pts[pts.length - 1];
+          line += ` T ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+          const area = `${line} L ${last.x.toFixed(1)} ${yToSvg(0).toFixed(1)} ` +
+                       `L ${pts[0].x.toFixed(1)} ${yToSvg(0).toFixed(1)} Z`;
+          return { line, area };
+        });
+
+        // Sleep band — cycle_start → wakeup, mapped to hour x-positions.
+        let sleepBand: { x: number; w: number } | null = null;
+        const wakeup = data.sleep?.wakeup;
+        if (wakeup) {
+          const [wh, wm] = wakeup.split(':').map(Number);
+          const wakeupDt = new Date(cycleStart);
+          wakeupDt.setHours(wh, wm, 0, 0);
+          if (wakeupDt < cycleStart) wakeupDt.setDate(wakeupDt.getDate() + 1);
+          const wakeupHours = (wakeupDt.getTime() - cycleStart.getTime()) / 3600_000;
+          if (wakeupHours > 0 && wakeupHours <= TOTAL_HOURS) {
+            sleepBand = { x: padL, w: xForHour(wakeupHours) - padL };
+          }
+        }
+
+        // Workout markers — Bevel-style 🏋️ icon above the chart at each
+        // workout's start time. `time` from backend is "HH:MM" so we
+        // combine with the cycle's calendar day to build a datetime.
+        const workoutMarkers: { x: number; w: number }[] = [];
+        for (const w of (data.strain?.workouts || [])) {
+          if (!w.time) continue;
+          const [hh, mm] = w.time.split(':').map(Number);
+          if (Number.isNaN(hh)) continue;
+          const wDt = new Date(cycleStart);
+          wDt.setHours(hh, mm || 0, 0, 0);
+          if (wDt < cycleStart) wDt.setDate(wDt.getDate() + 1);
+          const wHours = (wDt.getTime() - cycleStart.getTime()) / 3600_000;
+          if (wHours < 0 || wHours > TOTAL_HOURS) continue;
+          const wEndHours = Math.min(TOTAL_HOURS, wHours + (w.duration_min || 30) / 60);
+          workoutMarkers.push({
+            x: xForHour(wHours),
+            w: xForHour(wEndHours) - xForHour(wHours),
+          });
+        }
+
+        // Time-axis labels every 4h (per Jig's "4 8 12") — round clock
+        // hours within the 24h cycle window. With cycle_start typically
+        // late-evening, this lands labels like 04:00 / 08:00 / 12:00 /
+        // 16:00 / 20:00 (5 evenly-spaced labels across the day).
+        const timeLabels: { x: number; label: string }[] = (() => {
+          const out: { x: number; label: string }[] = [];
+          for (const hour of [4, 8, 12, 16, 20]) {
+            const candidate = new Date(cycleStart);
+            candidate.setHours(hour, 0, 0, 0);
+            // If the candidate clock-hour lands BEFORE cycle_start
+            // (e.g., cycle started 22:00 yesterday, label "04:00" is
+            // tomorrow morning) bump to next day.
+            if (candidate < cycleStart) candidate.setDate(candidate.getDate() + 1);
+            const hoursFromStart = (candidate.getTime() - cycleStart.getTime()) / 3600_000;
+            if (hoursFromStart <= 0 || hoursFromStart >= TOTAL_HOURS) continue;
+            out.push({
+              x: xForHour(hoursFromStart),
+              label: `${String(hour).padStart(2,'0')}:00`,
+            });
+          }
+          return out;
+        })();
+
+        // Color helper + current value (null-safe for empty days)
+        const colorForStress = (stress: number) =>
+          stress >= 70 ? '#FF453A' : stress >= 40 ? '#FF9F0A' : '#30D158';
+        const curVal = s.current;
+        const curColor = curVal === null ? '#888' : colorForStress(curVal);
+
+        return (
+          <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
+            <div className="glass-card px-4 pt-[6px] pb-2">
+              {/* Title row — title left, big current value right */}
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[14px] font-semibold text-white">ความเครียดวันนี้</span>
+                <span className="text-[22px] tabular-nums font-semibold leading-none shrink-0"
+                      style={{ color: noData || watchOff || curVal === null
+                        ? 'rgba(255,255,255,0.3)'
+                        : (stale ? '#888' : curColor) }}>
+                  {noData || watchOff || curVal === null ? '—' : curVal}
+                </span>
+              </div>
+
+              {/* Today's stress chart — Bevel-style:
+                  - Smooth gradient line through 24 hourly points (avg)
+                  - Area fill below for visual weight
+                  - Sleep band overlay (slate-blue + 🌙)
+                  - Y-axis labels 25/50/75/100, time labels every 6h
+                  - X-axis auto-scales to data so the line fills the chart */}
+              <svg width="100%" height={chartH} viewBox={`0 0 ${chartW} ${chartH}`}
+                   preserveAspectRatio="none" className="mt-2 block">
+                <defs>
+                  <linearGradient id="stressLineGrad" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%"  stopColor="#FF453A" />
+                    <stop offset="50%" stopColor="#FF9F0A" />
+                    <stop offset="100%" stopColor="#30D158" />
+                  </linearGradient>
+                  <linearGradient id="stressAreaGrad" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%"  stopColor="#FF453A" stopOpacity="0.20" />
+                    <stop offset="50%" stopColor="#FF9F0A" stopOpacity="0.12" />
+                    <stop offset="100%" stopColor="#30D158" stopOpacity="0.04" />
+                  </linearGradient>
+                </defs>
+
+                {/* Y-axis grid lines at 25/50/75 (subtle reference) */}
+                {[25, 50, 75].map(y => (
+                  <line key={y} x1={padL} x2={chartW - padR}
+                        y1={yToSvg(y)} y2={yToSvg(y)}
+                        stroke="rgba(255,255,255,0.05)" strokeDasharray="2,3" />
+                ))}
+
+                {/* Area fills — one per data segment (gaps stay empty) */}
+                {segmentPaths.map((sp, i) => sp.area && (
+                  <path key={`a${i}`} d={sp.area} fill="url(#stressAreaGrad)" />
+                ))}
+
+                {/* Sleep band — overlays area fill so it stays visible */}
+                {sleepBand && sleepBand.w > 0 && (
+                  <rect x={sleepBand.x} y={padT} width={sleepBand.w} height={innerH}
+                        fill="rgba(100,140,220,0.16)" rx="2" />
+                )}
+
+                {/* Workout duration bands — orange-tinted vertical strip
+                    spanning the workout time, like Bevel's chart. The
+                    🏋️ icon sits on top above the chart area. */}
+                {workoutMarkers.map((wm, i) => (
+                  <rect key={`wb${i}`} x={wm.x} y={padT}
+                        width={Math.max(2, wm.w)} height={innerH}
+                        fill="rgba(255,159,10,0.07)" rx="2" />
+                ))}
+
+                {/* Stress lines — one per data segment. Bevel-style: gaps
+                    between segments stay empty so "watch was off" reads
+                    visually. Non-scaling stroke for consistent width. */}
+                {segmentPaths.map((sp, i) => sp.line && (
+                  <path key={`l${i}`} d={sp.line} stroke="url(#stressLineGrad)"
+                        strokeWidth="1.2" fill="none"
+                        strokeLinejoin="round" strokeLinecap="round"
+                        vectorEffect="non-scaling-stroke" />
+                ))}
+
+                {/* Moon icon over sleep band */}
+                {sleepBand && sleepBand.w > 24 && (
+                  <text x={sleepBand.x + sleepBand.w / 2} y={padT + 11}
+                        textAnchor="middle" fontSize="11" opacity="0.75">🌙</text>
+                )}
+
+                {/* Workout 🏋️ icon — at top of each workout's start position */}
+                {workoutMarkers.map((wm, i) => (
+                  <text key={`wi${i}`} x={wm.x + Math.max(2, wm.w) / 2} y={padT + 9}
+                        textAnchor="middle" fontSize="10" opacity="0.85">🏋️</text>
+                ))}
+
+                {/* Y-axis labels (right edge) */}
+                {[25, 50, 75, 100].map(y => (
+                  <text key={y} x={chartW - padR + 1} y={yToSvg(y) + 3}
+                        fontSize="7" fill="rgba(255,255,255,0.25)"
+                        textAnchor="start">{y}</text>
+                ))}
+
+                {/* Time-axis labels — auto-positioned, snapped to round hours */}
+                {timeLabels.map(t => (
+                  <text key={t.label} x={t.x} y={chartH - 4} fontSize="9"
+                        fill="rgba(255,255,255,0.3)" textAnchor="middle">{t.label}</text>
+                ))}
+              </svg>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Health Monitor — Bevel-style grid */}
       <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
         <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Health Monitor</p>
@@ -583,153 +883,6 @@ export default function Home() {
             status="normal" format={(v) => v.toLocaleString()} />
         </div>
       </div>
-
-      {/* Stress card — Bevel-style: Highest/Lowest/Average numbers + gauge.
-          Dropped the line chart (per Jig's request to match Bevel exactly).
-          Anti-engagement framing still holds: gauge shows the day's picture,
-          not a live value that invites obsessive checking. */}
-      {data.stress && data.stress.current !== null && (() => {
-        const s = data.stress;
-
-        // Sample-level freshness (Apple Watch HRV is sparse ~5/day)
-        let updatedLabel = '';
-        let stale = false;
-        if (s.latest_sample_time) {
-          const d = new Date(s.latest_sample_time);
-          updatedLabel = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-          stale = (Date.now() - d.getTime()) / 60000 > 60;
-        }
-
-        // Gauge level label: Low / Med / High
-        const gaugeVal = s.current!;
-        const gaugeLabel = gaugeVal >= 70 ? 'High' : gaugeVal >= 40 ? 'Med' : 'Low';
-        const gaugeColor = gaugeVal >= 70 ? '#FF453A' : gaugeVal >= 40 ? '#FF9F0A' : '#30D158';
-
-        // Circular gauge SVG — 120×120, stroke arc 270° (like Bevel).
-        // Background ring: cyan-to-orange-to-red gradient (visual hint).
-        // Pointer dot: position based on gaugeVal.
-        const cx = 60, cy = 60, r = 46;
-        const startAngle = 135;   // bottom-left start
-        const endAngle = 45;      // bottom-right end (going clockwise over top)
-        const totalArc = 270;     // degrees
-        const valueAngle = startAngle + (gaugeVal / 100) * totalArc;
-        const toXY = (deg: number) => {
-          const rad = (deg * Math.PI) / 180;
-          return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-        };
-        const bgStart = toXY(startAngle);
-        const bgEnd = toXY(endAngle + 360);   // go around
-        const dot = toXY(valueAngle);
-        // Background track: full 270° arc
-        const bgArc = `M ${bgStart.x.toFixed(2)} ${bgStart.y.toFixed(2)} A ${r} ${r} 0 1 1 ${bgEnd.x.toFixed(2)} ${bgEnd.y.toFixed(2)}`;
-
-        const trendIcon = s.weekly_trend == null ? '' : s.weekly_trend > 3 ? '↑' : s.weekly_trend < -3 ? '↓' : '→';
-        const trendText = s.weekly_trend == null ? '' :
-          s.weekly_trend > 3 ? 'เพิ่มขึ้นจากสัปดาห์ก่อน' :
-          s.weekly_trend < -3 ? 'ลดลงจากสัปดาห์ก่อน' :
-          'คงที่';
-        const stabMap: Record<string, { label: string; color: string }> = {
-          stable:    { label: 'เสถียร',          color: '#30D158' },
-          variable:  { label: 'ค่อนข้างแปรปรวน',  color: '#FF9F0A' },
-          unstable:  { label: 'ไม่เสถียร',        color: '#FF453A' },
-          'ไม่มีข้อมูล':  { label: 'ข้อมูลไม่พอ',    color: '#888' },
-        };
-        const stab = stabMap[s.stability] || stabMap['ไม่มีข้อมูล'];
-
-        // Gauge 82: compromise between "big enough to read" and "small
-        // enough not to dwarf the content." Left stack content is ~60px,
-        // so 82 gauge gives ~11px breathing room on each side under
-        // items-center — enough to look balanced, not enough to look
-        // like dead space.
-        const gaugeSize = 82;
-
-        return (
-          <div className="mx-5 mb-4 animate-fade-up animate-delay-4">
-            <p className="text-[12px] uppercase tracking-[0.15em] text-white/30 mb-2 px-1">Stress</p>
-            <div className="glass-card px-4 pt-[3px] pb-2">
-              {/* Reverted to items-center (title inside left column). pt-[3px]
-                  = 1px less than original pt-1 (4px) to honor Jig's "1px up"
-                  request after restoring the "เหมือนเดิม" layout. */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="leading-tight">
-                    <span className="text-[14px] font-semibold text-white">Stress วันนี้</span>
-                    {updatedLabel && (
-                      <span className={`text-[10px] ml-1.5 ${stale ? 'text-amber-400/70' : 'text-white/40'}`}>
-                        · อัปเดตล่าสุด {updatedLabel}{stale ? ' · ไม่สด' : ''}
-                      </span>
-                    )}
-                  </p>
-                  <div className="flex justify-between mt-2 pr-2">
-                    <div>
-                      <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF453A' }}>
-                        {s.highest ?? '—'}
-                      </p>
-                      <p className="text-[10px] text-white/50 mt-0.5 leading-none">Highest</p>
-                    </div>
-                    <div>
-                      <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#30D158' }}>
-                        {s.lowest ?? '—'}
-                      </p>
-                      <p className="text-[10px] text-white/50 mt-0.5 leading-none">Lowest</p>
-                    </div>
-                    <div>
-                      <p className="text-[22px] tabular-nums font-semibold leading-none" style={{ color: '#FF9F0A' }}>
-                        {s.avg ?? '—'}
-                      </p>
-                      <p className="text-[10px] text-white/50 mt-0.5 leading-none">Average</p>
-                    </div>
-                  </div>
-                </div>
-
-                <svg width={gaugeSize} height={gaugeSize} viewBox="0 0 120 120" className="shrink-0">
-                  <defs>
-                    <linearGradient id="gaugeGrad" x1="0" x2="1" y1="1" y2="0">
-                      <stop offset="0%"   stopColor="#30D158" />
-                      <stop offset="50%"  stopColor="#FF9F0A" />
-                      <stop offset="100%" stopColor="#FF453A" />
-                    </linearGradient>
-                  </defs>
-                  <path d={bgArc} stroke="rgba(255,255,255,0.08)" strokeWidth="12" fill="none" strokeLinecap="round" />
-                  <path d={bgArc} stroke="url(#gaugeGrad)" strokeWidth="12" fill="none" strokeLinecap="round" opacity="0.35" />
-                  <circle cx={dot.x} cy={dot.y} r="7" fill={gaugeColor}
-                          stroke="#141414" strokeWidth="2.5" />
-                  <text x={cx} y={cy - 2} textAnchor="middle"
-                        fontSize="26" fontWeight="600" fill={stale ? '#888' : '#fff'}>
-                    {gaugeVal}
-                  </text>
-                  <text x={cx} y={cy + 20} textAnchor="middle"
-                        fontSize="12" fill="rgba(255,255,255,0.5)">
-                    {gaugeLabel}
-                  </text>
-                </svg>
-              </div>
-
-              {(s.weekly_avg !== null || s.cv !== null) && (
-                <div className="mt-1 pt-1 border-t border-white/5 space-y-0.5 text-[11px]">
-                  {s.weekly_avg !== null && (
-                    <div className="flex items-baseline justify-between">
-                      <span className="text-white/50">สัปดาห์นี้ avg</span>
-                      <span className="text-white/70 tabular-nums">
-                        {s.weekly_avg}% <span className="text-white/40">{trendIcon} {trendText}</span>
-                      </span>
-                    </div>
-                  )}
-                  {s.cv !== null && (
-                    <div className="flex items-baseline justify-between">
-                      <span className="text-white/50">ระบบประสาทอัตโนมัติ</span>
-                      <span className="tabular-nums">
-                        <span style={{ color: stab.color }}>{stab.label}</span>
-                        <span className="text-white/30"> · CV {s.cv}%</span>
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Timeline */}
       {data.strain.workouts.length > 0 && (

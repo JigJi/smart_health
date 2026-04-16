@@ -32,12 +32,20 @@ so the UI can render "ข้อมูลไม่พอ" rather than show garbag
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import duckdb
+
+# Project-wide local timezone — Apple Watch / iOS data is naturally in
+# the wearer's local time, and DuckDB queries are set to Asia/Bangkok.
+# Stamping this on the cycle_start ISO string lets the JS frontend parse
+# unambiguously (without a TZ suffix, browsers fall back to local time
+# which can shift the chart x-axis by hours and silently drop points).
+_BKK = ZoneInfo("Asia/Bangkok")
 
 
 def _all_day_hrv_by_day(parquet_dir: Path, days: int = 120) -> dict[date, float]:
@@ -83,6 +91,124 @@ def _hrv_samples_for_day(parquet_dir: Path, d: date) -> list[tuple[str, float]]:
              float(r[1])) for r in rows if r[1] is not None]
 
 
+def _latest_hr_sample_time(parquet_dir: Path, d: date) -> str | None:
+    """ISO time of the most recent heart-rate sample on day `d`, or None.
+
+    Why HR (not HRV)? HR samples come every ~6 min when the watch is worn
+    (HRV is sparse — ~1 every 1-3 hours). So HR is the dense, reliable
+    "watch is currently on the wrist" signal: if the latest HR sample is
+    >30 min old, the watch is almost certainly OFF. Used by the UI to
+    avoid showing a stale stress reading as "current" — e.g., "stress 68"
+    when the user took the watch off at 9 AM and is now opening the app
+    at 2 PM. The 68 isn't current; it's the last reading they happened
+    to take. The UI uses this signal to say "ไม่ได้สวมนาฬิกา" instead.
+    """
+    p = parquet_dir / "heart_rate.parquet"
+    if not p.exists():
+        return None
+    con = duckdb.connect(":memory:")
+    con.execute("SET TimeZone='Asia/Bangkok'")
+    row = con.execute(f"""
+        SELECT max(start) AS t
+        FROM read_parquet('{p.as_posix()}')
+        WHERE CAST(start AS DATE) = DATE '{d.isoformat()}'
+    """).fetchone()
+    if row and row[0]:
+        t = row[0]
+        return t.isoformat() if hasattr(t, 'isoformat') else str(t)
+    return None
+
+
+def _cycle_start(d: date, bedtime_str: str | None) -> datetime:
+    """Start of the 24h "day cycle" anchored on the user's bedtime.
+
+    Per Jig: chart starts when sleep began (when "today" really started
+    for the user) and spans 24h ending just before the next bedtime.
+    Bedtime hour decides whether the cycle began the previous calendar
+    day (evening sleeper, h>=18) or the same calendar day (early-AM
+    sleeper, h<12). Defaults to 22:00 if bedtime data missing.
+    """
+    if bedtime_str:
+        try:
+            h, m = map(int, bedtime_str.split(":"))
+        except (ValueError, AttributeError):
+            h, m = 22, 0
+    else:
+        h, m = 22, 0
+
+    if h < 12:
+        # Early-AM bedtime (e.g., 02:30) — cycle starts on day d itself
+        return datetime.combine(d, time(h, m))
+    # Evening / mid-day bedtime — cycle starts the previous evening
+    return datetime.combine(d - timedelta(days=1), time(h, m))
+
+
+def _hr_samples_for_window(parquet_dir: Path, start_dt: datetime,
+                           end_dt: datetime) -> list[tuple[str, float]]:
+    """All HR samples in the window [start_dt, end_dt). Dense (~every 6 min
+    when watch is worn, more during workouts). Used for the Bevel-style
+    stress chart line — HRV alone is too sparse (~5/day) to draw a
+    smooth chart, so per-sample stress is computed from HR instead.
+    """
+    p = parquet_dir / "heart_rate.parquet"
+    if not p.exists():
+        return []
+    con = duckdb.connect(":memory:")
+    con.execute("SET TimeZone='Asia/Bangkok'")
+    rows = con.execute(f"""
+        SELECT start, value
+        FROM read_parquet('{p.as_posix()}')
+        WHERE start >= TIMESTAMP '{start_dt.isoformat()}'
+          AND start <  TIMESTAMP '{end_dt.isoformat()}'
+        ORDER BY start
+    """).fetchall()
+    return [(r[0].isoformat() if hasattr(r[0], 'isoformat') else str(r[0]),
+             float(r[1])) for r in rows if r[1] is not None]
+
+
+def _rhr_baseline(parquet_dir: Path, d: date, days: int = 30) -> float | None:
+    """Mean resting heart rate over the last `days` days — personal
+    baseline for HR→stress mapping. Returns None if not enough data.
+    """
+    p = parquet_dir / "resting_heart_rate.parquet"
+    if not p.exists():
+        return None
+    con = duckdb.connect(":memory:")
+    con.execute("SET TimeZone='Asia/Bangkok'")
+    start = (d - timedelta(days=days)).isoformat()
+    end = d.isoformat()
+    row = con.execute(f"""
+        SELECT avg(value), count(*) FROM read_parquet('{p.as_posix()}')
+        WHERE CAST(start AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'
+    """).fetchone()
+    if row and row[0] is not None and row[1] >= 5:
+        return float(row[0])
+    return None
+
+
+def _stress_from_hr(hr: float, rhr_baseline: float) -> int:
+    """Map heart rate (relative to personal RHR baseline) to 0-100 stress.
+
+    Bevel-style: any HR elevation above resting baseline drives stress
+    up. Workouts will spike toward 100 — that's faithful to Bevel and
+    physiologically honest (the autonomic nervous system IS firing hard).
+    Floor at 5: a living body always has some autonomic activity.
+
+    Mapping (assuming RHR baseline ~60 bpm):
+      HR <= RHR        → 5-15  (deeply calm / sleep)
+      HR =  RHR + 10   → ~27   (relaxed)
+      HR =  RHR + 25   → ~45   (mild activity / mild stress)
+      HR =  RHR + 45   → ~69   (moderate activity)
+      HR >= RHR + 70   → ~95+  (workout / acute stress)
+    """
+    delta = hr - rhr_baseline
+    if delta <= 0:
+        # Below baseline — drop further as HR decreases (sleep / deep rest)
+        return max(5, round(15 + delta * 0.5))
+    # Above baseline — linear ramp, slope chosen so workouts hit ~95
+    return max(5, min(100, round(15 + delta * 1.2)))
+
+
 def _stress_from_hrv(hrv_val: float, base_mean: float, base_std: float) -> int:
     """z=0 → 50 (normal), z=-2 → 100 (max stress), z=+2 → ~5 (calm floor).
 
@@ -98,24 +224,28 @@ def _stress_from_hrv(hrv_val: float, base_mean: float, base_std: float) -> int:
 
 
 def compute_stress(parquet_dir: Path, target: date | None = None,
-                   today_kcal: float | None = None) -> dict[str, Any]:
+                   today_kcal: float | None = None,
+                   bedtime: str | None = None) -> dict[str, Any]:
     """Stress summary — Bevel-style day-story, not a live gauge.
 
-    Computes per-sample stress from HRV readings today, then summarizes:
-      - current: most recent sample (fresh when app syncs)
-      - peak:    highest stress moment today (usually during workout)
-      - avg:     mean across today
-      - timeline: list of {time, stress} for UI chart
+    Per-sample stress for the chart is now HR-derived (dense ~6 min)
+    instead of HRV-derived (sparse ~5/day) so the chart line looks like
+    Bevel's — smooth and full. Weekly averages, CV, and stability still
+    use HRV (Marco Altini-style autonomic measure across days).
 
-    No physical-load boost here (that's a separate axis already shown as
-    "ความเหนื่อยล้า"). Stress is pure autonomic / HRV-derived.
+    The 24h "day cycle" is anchored on the user's bedtime — by Jig's
+    request, "today" starts when sleep began and ends just before the
+    next bedtime. This shifts the chart from a 00:00→00:00 calendar
+    cycle to a sleep→sleep biological cycle.
 
-    today_kcal param kept for signature stability but unused — remove
-    on next pass if no caller needs it. (Strain-boost approach double-
-    counted with the strain metric and was explicitly rejected by Jig
-    after seeing the scary 78% number it produced on a restful evening.)
+      - current: most recent HR-derived stress sample
+      - timeline: HR-derived per-sample stress across the 24h cycle
+      - highest / lowest / avg: aggregates across the cycle
+      - cycle_start: ISO datetime of the cycle's left edge (frontend uses
+        this to anchor the chart x-axis)
 
-    Returns partial dict when data sparse.
+    today_kcal param kept for signature stability but unused — physical
+    load is already implicit in HR-derived stress (workouts spike HR).
     """
     _ = today_kcal  # intentionally unused; kept for backward-compat
     d = target or date.today()
@@ -124,7 +254,8 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
         return {"acute": None, "weekly_avg": None, "weekly_trend": None,
                 "cv": None, "stability": "ไม่มีข้อมูล"}
 
-    # Baseline for z-score: 60 days strictly before today
+    # Baseline for HRV z-score (used by weekly_avg / CV below): 60 days
+    # strictly before today
     baseline_pool = [v for dd, v in hrv_by_day.items()
                      if dd < d and (d - dd).days <= 60]
     if len(baseline_pool) >= 7:
@@ -133,10 +264,15 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
     else:
         base_mean = base_std = None
 
-    # 1. Per-sample stress today — Bevel-style summary.
-    #    highest / lowest / average = what the UI shows as 3 numbers.
+    # 1. Per-sample stress for the 24h cycle — HR-derived, Bevel-dense.
+    #    highest / lowest / average = aggregates over the cycle.
     #    peak_time kept for the "at 10:30" hint on the highest value.
-    #    current (= latest sample) drives the gauge position.
+    #    current (= last sample's stress) feeds the prominent value
+    #    on the card and the last-point dot on the chart.
+    cycle_start_dt = _cycle_start(d, bedtime)
+    cycle_end_dt = cycle_start_dt + timedelta(days=1)
+    rhr_base = _rhr_baseline(parquet_dir, d)
+
     current = None
     highest = None
     lowest = None
@@ -144,12 +280,12 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
     avg = None
     timeline: list[dict[str, Any]] = []
     latest_sample_time: str | None = None
-    if base_mean is not None:
-        samples = _hrv_samples_for_day(parquet_dir, d)
-        if samples:
+    if rhr_base is not None:
+        hr_samples = _hr_samples_for_window(parquet_dir, cycle_start_dt, cycle_end_dt)
+        if hr_samples:
             per_sample = []
-            for t, v in samples:
-                s = _stress_from_hrv(v, base_mean, base_std)
+            for t, hr in hr_samples:
+                s = _stress_from_hr(hr, rhr_base)
                 per_sample.append((t, s))
                 timeline.append({"time": t, "stress": s})
             stresses = [s for _, s in per_sample]
@@ -206,7 +342,9 @@ def compute_stress(parquet_dir: Path, target: date | None = None,
         "peak_time": peak_time,           # ISO time of highest moment
         "avg": avg,                       # mean stress today
         "timeline": timeline,             # [{time, stress}] — kept for any future chart need
-        "latest_sample_time": latest_sample_time,  # freshness indicator
+        "latest_sample_time": latest_sample_time,  # latest stress sample (= latest HR sample now)
+        "latest_hr_sample_time": _latest_hr_sample_time(parquet_dir, d),  # watch-worn signal
+        "cycle_start": cycle_start_dt.replace(tzinfo=_BKK).isoformat(),  # left edge of chart x-axis (TZ-stamped)
         "weekly_avg": weekly_avg,
         "weekly_trend": weekly_trend,    # signed pp (+5 = rising, -3 = calming)
         "cv": cv,                        # % — lower is more stable

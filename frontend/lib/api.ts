@@ -102,7 +102,16 @@ export const api = {
   rhr: (days = 90) => j<any[]>(`/metrics/rhr?days=${days}`),
   recovery: (days = 30) => j<any[]>(`/recovery?days=${days}`),
   status: () => j<{ parquet_dir: string; files: Record<string, number> }>('/status'),
-  today: (date?: string) => j<TodayData>(date ? `/api/today?date=${date}` : '/api/today'),
+  today: (date?: string) => {
+    // Forward ?mock=1 from the page URL so dev can preview the chart
+    // with synthetic data when real parquet is stale.
+    const mock = typeof window !== 'undefined' && window.location.search.includes('mock=1');
+    const params = new URLSearchParams();
+    if (date) params.set('date', date);
+    if (mock) params.set('mock', '1');
+    const qs = params.toString();
+    return j<TodayData>(qs ? `/api/today?${qs}` : '/api/today');
+  },
   calendar: (year?: number, month?: number) => {
     const params = new URLSearchParams();
     if (year) params.set('year', String(year));
@@ -153,7 +162,9 @@ export type TodayData = {
     peak_time: string | null;               // ISO time of highest moment
     avg: number | null;                     // mean across today (Bevel's "Average")
     timeline: { time: string; stress: number }[];
-    latest_sample_time: string | null;      // freshness indicator
+    latest_sample_time: string | null;      // latest stress sample (HR-derived now)
+    latest_hr_sample_time: string | null;   // watch-worn signal — HR is dense (~6 min) so >30min stale = watch off
+    cycle_start: string | null;             // ISO datetime — left edge of chart's 24h cycle (anchored at bedtime)
     weekly_avg: number | null;
     weekly_trend: number | null;
     cv: number | null;
