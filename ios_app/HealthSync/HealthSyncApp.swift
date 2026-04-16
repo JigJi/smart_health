@@ -33,7 +33,10 @@ struct HealthSyncApp: App {
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active && healthKit.isAuthorized {
                     // First launch → backfill 5y. Subsequent launches → incremental sync.
-                    healthKit.initialBackfillIfNeeded()
+                    // forceSync=true bypasses the 30s throttle: when the user
+                    // explicitly opens the app, they expect fresh data —
+                    // throttling here is what made it feel "delayed สุดๆ".
+                    healthKit.initialBackfillIfNeeded(forceSync: true)
                 }
             }
         }

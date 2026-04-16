@@ -27,11 +27,15 @@ class HealthKitManager: ObservableObject {
     @Published var backfillStatus = ""
 
     // Sync throttle — don't re-sync if we synced less than this ago.
-    // 5 min: short enough that opening the app shows near-live HRV/stress,
-    // long enough to prevent rapid-fire sync from scenePhase flapping
-    // (open/close/open within seconds won't spam the backend or HealthKit).
+    // 30s: tight enough that opening the app feels live (Bevel-fast),
+    // long enough to absorb scenePhase flapping (open/close/open within
+    // seconds won't spam HealthKit). The previous 5-minute throttle was
+    // too aggressive — a user opening the app 2 minutes after closing
+    // would see frozen data with no fresh pull happening.
+    // For explicit user-triggered syncs (manual button, scenePhase active)
+    // pass force=true to bypass entirely.
     private var lastSyncAt: Date?
-    private let syncMinInterval: TimeInterval = 300   // 5 minutes
+    private let syncMinInterval: TimeInterval = 30   // 30 seconds
 
     // Request permission for ALL types we might ever use — ask once, never prompt again.
     // เหตุผล: ถ้าเพิ่ม type ใหม่ภายหลัง iOS จะต้องขอใหม่ ผู้ใช้จะรู้สึกรำคาญ
@@ -106,8 +110,14 @@ class HealthKitManager: ObservableObject {
             HKQuantityType(.heartRateVariabilitySDNN),
             HKQuantityType(.restingHeartRate),
         ]
+        // .immediate = iOS wakes the app as soon as new data arrives from
+        // the watch (was .hourly = wait up to an hour). Battery cost is
+        // minimal because HRV/RHR are inherently sparse (a few samples per
+        // hour at most) and the throttle below absorbs back-to-back fires.
+        // The user's complaint was "ของ Bevel อัพเดทตลอดเวลา ของเรา delay" —
+        // .hourly was a chunk of that delay.
         for type in types {
-            store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
+            store.enableBackgroundDelivery(for: type, frequency: .immediate) { _, _ in }
         }
 
         // Observe each type — iOS will wake us when new data arrives
@@ -350,18 +360,20 @@ class HealthKitManager: ObservableObject {
     /// On first install, fetch 5 years of HealthKit history → POST to backend in chunks.
     /// After completion, mark `didBackfill=true` so it never runs again on this device.
     /// Subsequent app opens just call `syncNow()` (incremental 25h).
-    func initialBackfillIfNeeded() {
+    /// `forceSync=true` (used when user explicitly opens the app) bypasses
+    /// the 30s throttle so they always see the freshest possible data.
+    func initialBackfillIfNeeded(forceSync: Bool = false) {
         // Atomic check-and-set on main thread (same pattern as syncNow)
         if Thread.isMainThread {
-            _initialBackfillInternal()
+            _initialBackfillInternal(forceSync: forceSync)
         } else {
-            DispatchQueue.main.async { self._initialBackfillInternal() }
+            DispatchQueue.main.async { self._initialBackfillInternal(forceSync: forceSync) }
         }
     }
 
-    private func _initialBackfillInternal() {
+    private func _initialBackfillInternal(forceSync: Bool = false) {
         if UserDefaults.standard.bool(forKey: "didBackfill") {
-            syncNow()
+            syncNow(force: forceSync)
             return
         }
         if isBackfilling { return }

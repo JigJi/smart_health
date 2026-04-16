@@ -242,7 +242,7 @@ struct SyncView: View {
                 .background(Color(.systemGray6))
                 .cornerRadius(12)
 
-                Button(action: { hk.syncNow() }) {
+                Button(action: { hk.syncNow(force: true) }) {
                     Label("Sync ตอนนี้", systemImage: "arrow.triangle.2.circlepath")
                         .frame(maxWidth: .infinity)
                         .padding()
