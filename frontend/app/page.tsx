@@ -717,7 +717,11 @@ export default function Home() {
         // Workout markers — Bevel-style 🏋️ icon above the chart at each
         // workout's start time. `time` from backend is "HH:MM" so we
         // combine with the cycle's calendar day to build a datetime.
-        const workoutMarkers: { x: number; w: number }[] = [];
+        // Two workouts close in time (back-to-back gym session: e.g.,
+        // weights + treadmill) used to render two overlapping 🏋️ icons.
+        // Merge any markers whose duration bands overlap or are within
+        // 12px of each other — gym sessions read as one logical block.
+        const rawWorkoutMarkers: { x: number; w: number }[] = [];
         for (const w of (data.strain?.workouts || [])) {
           if (!w.time) continue;
           const [hh, mm] = w.time.split(':').map(Number);
@@ -728,10 +732,21 @@ export default function Home() {
           const wHours = (wDt.getTime() - cycleStart.getTime()) / 3600_000;
           if (wHours < 0 || wHours > TOTAL_HOURS) continue;
           const wEndHours = Math.min(TOTAL_HOURS, wHours + (w.duration_min || 30) / 60);
-          workoutMarkers.push({
+          rawWorkoutMarkers.push({
             x: xForHour(wHours),
             w: xForHour(wEndHours) - xForHour(wHours),
           });
+        }
+        rawWorkoutMarkers.sort((a, b) => a.x - b.x);
+        const workoutMarkers: { x: number; w: number }[] = [];
+        for (const wm of rawWorkoutMarkers) {
+          const last = workoutMarkers[workoutMarkers.length - 1];
+          if (last && wm.x <= last.x + last.w + 12) {
+            // Overlap or near — extend the previous block
+            last.w = Math.max(last.x + last.w, wm.x + wm.w) - last.x;
+          } else {
+            workoutMarkers.push({ x: wm.x, w: wm.w });
+          }
         }
 
         // Time-axis labels every 4h (per Jig's "4 8 12") — round clock
