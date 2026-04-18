@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, TodayData, CalendarMonth } from '@/lib/api';
 
 // localStorage key for stale-while-revalidate dashboard cache.
@@ -233,21 +233,45 @@ export default function Home() {
   const [selectedDate, setSelectedDate] = useState<string | undefined>();
   const [error, setError] = useState(false);
   const [showTips, setShowTips] = useState(false);
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // All loads are silent — the UI shows previous data while new data fetches
   // in the background, then swaps in when ready. No blocking overlay anywhere
   // except the very first cold-start render (no cache + no response yet).
-  const loadDay = (date?: string) => {
+  const loadDay = (date?: string, attempt = 0) => {
     api.today(date).then(d => {
+      setError(false);
       setData(d);
-      // Persist "today" payload for next session's first paint (SWR pattern).
-      // Skip when a specific date was requested — only the default "today" view
-      // is what users land on first, so that's the only one worth caching.
       if (!date) {
         try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch {}
       }
-    }).catch(() => setError(true));
+    }).catch(() => {
+      // Retry up to 4 times with exponential backoff (1s, 2s, 4s, 8s)
+      // before showing error. If we already have cached data, keep showing it.
+      if (attempt < 4) {
+        const delay = Math.pow(2, attempt) * 1000;
+        retryRef.current = setTimeout(() => loadDay(date, attempt + 1), delay);
+      } else {
+        setError(true);
+      }
+    });
   };
+
+  // When in error state, keep retrying every 10s in the background
+  useEffect(() => {
+    if (!error) return;
+    const interval = setInterval(() => {
+      api.today().then(d => {
+        setError(false);
+        setData(d);
+        try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch {}
+      }).catch(() => {}); // silently keep trying
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [error]);
+
+  // Cleanup retry timeout on unmount
+  useEffect(() => () => { if (retryRef.current) clearTimeout(retryRef.current); }, []);
 
   const loadCalendar = (y: number, m: number) => {
     api.calendar(y, m).then(setCalData).catch(() => {});
@@ -287,9 +311,14 @@ export default function Home() {
     };
   });
 
-  if (error) return (
+  // If we have cached data, show it even during errors (with a subtle indicator).
+  // Only show the full-screen error when there's truly nothing to display.
+  if (error && !data) return (
     <main className="min-h-screen flex items-center justify-center bg-[#141414]">
-      <p className="text-white/40 text-sm">ยังไม่ได้เชื่อมต่อ backend</p>
+      <div className="text-center">
+        <p className="text-white/40 text-sm">ยังไม่ได้เชื่อมต่อ backend</p>
+        <p className="text-white/25 text-xs mt-2">กำลังลองใหม่...</p>
+      </div>
     </main>
   );
 
@@ -300,9 +329,12 @@ export default function Home() {
   );
 
   const { signals } = data;
-  const sleepPct = signals.sleep.hours
-    ? Math.min(100, Math.round((signals.sleep.hours / 8) * 100))
-    : null;
+  // Use quality-aware sleep score from backend if available,
+  // otherwise fall back to duration-based estimate
+  const sleepPct = data.recovery?.sleep_score
+    ?? (signals.sleep.hours
+      ? Math.min(100, Math.round((signals.sleep.hours / 8) * 100))
+      : null);
 
   return (
     <main className="min-h-screen pb-16 relative" style={{

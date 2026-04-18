@@ -31,6 +31,90 @@ BASELINE_DAYS = 30
 SLEEP_TARGET_MIN = 7 * 60  # 7 hours
 
 
+def compute_sleep_quality(
+    hours: float,
+    deep_min: float | None,
+    rem_min: float | None,
+    awake_min: float | None,
+    bedtime: str | None,
+) -> int | None:
+    """Quality-aware sleep score (0-100).
+
+    Clinical literature (Walker, Oura, Whoop):
+    - Deep sleep target: 60-90 min/night (13-23% of 7h)
+    - REM target: 90-120 min/night (20-25% of 7h)
+    - Sleep efficiency: time asleep / (asleep + awake)
+    - Bedtime consistency: late bedtimes disrupt first deep sleep cycles
+
+    Weights: Duration 35%, Deep 25%, REM 20%, Efficiency 10%, Bedtime 10%
+    Falls back to duration-only if no stage data available.
+    """
+    total_min = hours * 60
+
+    # Duration component (0-1): 7h target
+    dur_score = max(0.0, min(1.0, total_min / 420))
+
+    # If no stage data, return duration-only score (legacy nights)
+    if deep_min is None and rem_min is None:
+        return round(dur_score * 100)
+
+    deep = deep_min or 0
+    rem = rem_min or 0
+    awake = awake_min or 0
+
+    # Deep sleep component (0-1): target 60-90 min
+    if deep >= 90:
+        deep_score = 1.0
+    elif deep >= 60:
+        deep_score = 0.7 + 0.3 * (deep - 60) / 30
+    elif deep >= 30:
+        deep_score = 0.3 + 0.4 * (deep - 30) / 30
+    else:
+        deep_score = max(0.0, deep / 30 * 0.3)
+
+    # REM component (0-1): target 90-120 min
+    if rem >= 120:
+        rem_score = 1.0
+    elif rem >= 60:
+        rem_score = 0.5 + 0.5 * (rem - 60) / 60
+    else:
+        rem_score = max(0.0, rem / 60 * 0.5)
+
+    # Efficiency component (0-1): penalize time awake during sleep window
+    if total_min + awake > 0:
+        efficiency = total_min / (total_min + awake)
+        eff_score = max(0.0, min(1.0, (efficiency - 0.75) / 0.20))  # 75%->0, 95%->1
+    else:
+        eff_score = 0.5
+
+    # Bedtime component (0-1): earlier bedtime = better deep sleep quality
+    bed_score = 1.0
+    if bedtime:
+        try:
+            bh = int(bedtime.split(":")[0])
+            if bh >= 21:
+                bed_score = 1.0
+            elif bh == 0:
+                bed_score = 0.7
+            elif bh == 1:
+                bed_score = 0.35
+            elif bh >= 2 and bh <= 5:
+                bed_score = 0.1
+        except (ValueError, IndexError):
+            pass
+
+    # Weighted combination
+    score = (
+        dur_score * 0.35 +
+        deep_score * 0.25 +
+        rem_score * 0.20 +
+        eff_score * 0.10 +
+        bed_score * 0.10
+    )
+
+    return round(score * 100)
+
+
 @dataclass
 class RecoveryComponents:
     hrv_score: float | None      # 0..1
@@ -76,6 +160,11 @@ def compute_recovery_series(store: HealthStore, days: int = 60) -> list[dict[str
     hrv_by_day = {r["day"]: r["hrv_ms"] for r in hrv_rows if r["hrv_ms"] is not None}
     rhr_by_day = {r["day"]: r["rhr_bpm"] for r in rhr_rows if r["rhr_bpm"] is not None}
     sleep_by_day = {r["day"]: r["asleep_min"] for r in sleep_rows}
+    # Stage data for quality-aware scoring (modern nights only)
+    sleep_detail_by_day = {
+        r["day"]: r for r in sleep_rows
+        if r.get("deep_min") is not None or r.get("rem_min") is not None
+    }
 
     all_days = sorted(set(hrv_by_day) | set(rhr_by_day) | set(sleep_by_day))
     out: list[dict[str, Any]] = []
@@ -118,7 +207,18 @@ def compute_recovery_series(store: HealthStore, days: int = 60) -> list[dict[str
                 rhr_score = _zscore_to_unit(z)
 
         if sleep_today is not None:
-            sleep_score = min(1.0, sleep_today / SLEEP_TARGET_MIN)
+            detail = sleep_detail_by_day.get(day)
+            if detail:
+                quality = compute_sleep_quality(
+                    sleep_today / 60.0,
+                    detail.get("deep_min"),
+                    detail.get("rem_min"),
+                    detail.get("awake_min"),
+                    None,  # no bedtime in series context
+                )
+                sleep_score = (quality / 100.0) if quality is not None else min(1.0, sleep_today / SLEEP_TARGET_MIN)
+            else:
+                sleep_score = min(1.0, sleep_today / SLEEP_TARGET_MIN)
 
         # Combine only the components we actually have — re-normalize weights.
         parts: list[tuple[float, float]] = []

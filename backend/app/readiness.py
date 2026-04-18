@@ -14,7 +14,7 @@ from typing import Any
 import duckdb
 
 from .queries import HealthStore
-from .recovery import compute_recovery_series
+from .recovery import compute_recovery_series, compute_sleep_quality
 
 
 _target_date_override: str | None = None
@@ -218,7 +218,7 @@ def _get_sleep(parquet_dir: Path) -> dict[str, Any]:
     has_modern = bool(flag_rows and flag_rows[0][0] == 1)
 
     if has_modern:
-        # Strict modern-only sum
+        # Strict modern-only sum — also break out stages for quality scoring
         rows = _query(parquet_dir, f"""
             SELECT
                 min(start) AS bedtime,
@@ -227,7 +227,19 @@ def _get_sleep(parquet_dir: Path) -> dict[str, Any]:
                           OR stage LIKE '%AsleepDeep%'
                           OR stage LIKE '%AsleepREM%'
                          THEN EXTRACT(EPOCH FROM ("end" - start)) / 3600.0
-                         ELSE 0 END) AS hours
+                         ELSE 0 END) AS hours,
+                SUM(CASE WHEN stage LIKE '%AsleepDeep%'
+                         THEN EXTRACT(EPOCH FROM ("end" - start)) / 60.0
+                         ELSE 0 END) AS deep_min,
+                SUM(CASE WHEN stage LIKE '%AsleepREM%'
+                         THEN EXTRACT(EPOCH FROM ("end" - start)) / 60.0
+                         ELSE 0 END) AS rem_min,
+                SUM(CASE WHEN stage LIKE '%AsleepCore%'
+                         THEN EXTRACT(EPOCH FROM ("end" - start)) / 60.0
+                         ELSE 0 END) AS core_min,
+                SUM(CASE WHEN stage LIKE '%Awake%'
+                         THEN EXTRACT(EPOCH FROM ("end" - start)) / 60.0
+                         ELSE 0 END) AS awake_min
             FROM read_parquet('{path}')
             WHERE {window_clause}
         """)
@@ -262,26 +274,57 @@ def _get_sleep(parquet_dir: Path) -> dict[str, Any]:
         """)
 
     if not rows or rows[0][2] is None or float(rows[0][2]) == 0:
-        return {"hours": None, "quality_label": "ไม่มีข้อมูล"}
+        return {"hours": None, "quality_label": "ไม่มีข้อมูล", "sleep_quality_pct": None}
 
     hours = round(float(rows[0][2]), 1)
     bedtime = rows[0][0]
     wakeup = rows[0][1]
 
-    if hours >= 7.5:
-        label = "ดีมาก"
-    elif hours >= 6.5:
-        label = "พอดี"
-    elif hours >= 5.5:
-        label = "น้อยไป"
+    # Stage breakdown (modern nights only, legacy = None)
+    deep_min = round(float(rows[0][3]), 1) if has_modern and len(rows[0]) > 3 and rows[0][3] else None
+    rem_min = round(float(rows[0][4]), 1) if has_modern and len(rows[0]) > 4 and rows[0][4] else None
+    core_min = round(float(rows[0][5]), 1) if has_modern and len(rows[0]) > 5 and rows[0][5] else None
+    awake_min = round(float(rows[0][6]), 1) if has_modern and len(rows[0]) > 6 and rows[0][6] else None
+
+    # ── Quality-aware sleep score (0-100) ──
+    # Combines duration + stage quality + efficiency + bedtime regularity.
+    # This replaces the old hours-only label system.
+    sleep_quality_pct = compute_sleep_quality(
+        hours, deep_min, rem_min, awake_min,
+        bedtime.strftime("%H:%M") if bedtime else None,
+    )
+
+    # Label now reflects quality, not just hours
+    if sleep_quality_pct is not None:
+        if sleep_quality_pct >= 80:
+            label = "ดีมาก"
+        elif sleep_quality_pct >= 65:
+            label = "พอดี"
+        elif sleep_quality_pct >= 45:
+            label = "น้อยไป"
+        else:
+            label = "น้อยมาก"
     else:
-        label = "น้อยมาก"
+        # Fallback for legacy nights without stage data
+        if hours >= 7.5:
+            label = "ดีมาก"
+        elif hours >= 6.5:
+            label = "พอดี"
+        elif hours >= 5.5:
+            label = "น้อยไป"
+        else:
+            label = "น้อยมาก"
 
     return {
         "hours": hours,
         "quality_label": label,
         "bedtime": str(bedtime.strftime("%H:%M")) if bedtime else None,
         "wakeup": str(wakeup.strftime("%H:%M")) if wakeup else None,
+        "deep_min": deep_min,
+        "rem_min": rem_min,
+        "core_min": core_min,
+        "awake_min": awake_min,
+        "sleep_quality_pct": sleep_quality_pct,
     }
 
 
@@ -685,9 +728,11 @@ def _build_natural_reason(data: dict[str, Any]) -> str:
     signals = data["signals"]
     parts = []
 
-    # Sleep
+    # Sleep — mention duration, quality, and fragmentation issues
     sleep_h = signals["sleep"].get("hours")
     bedtime = signals["sleep"].get("bedtime")
+    deep_min = signals["sleep"].get("deep_min")
+    awake_min = signals["sleep"].get("awake_min")
     if sleep_h is not None and bedtime:
         hour = int(bedtime.split(":")[0])
         if sleep_h < 5:
@@ -696,6 +741,16 @@ def _build_natural_reason(data: dict[str, Any]) -> str:
             parts.append(f"เมื่อคืนนอน {sleep_h:.0f} ชั่วโมง น้อยไปหน่อย")
         elif hour >= 1 and hour <= 4:
             parts.append(f"เมื่อคืนนอนดึก แต่นอนได้ {sleep_h:.0f} ชั่วโมง")
+
+        # Deep sleep warning (clinical target: ≥60 min)
+        if deep_min is not None and deep_min < 30:
+            parts.append(f"หลับลึกแค่ {deep_min:.0f} นาที")
+        elif deep_min is not None and deep_min < 45:
+            parts.append(f"หลับลึกน้อย ({deep_min:.0f} นาที)")
+
+        # Fragmented sleep warning (woke up a lot)
+        if awake_min is not None and awake_min >= 30:
+            parts.append(f"ตื่นระหว่างคืนรวม {awake_min:.0f} นาที")
 
     # Workouts done today
     workouts = data["strain"].get("workouts", [])
@@ -850,7 +905,12 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         rhr_score = _zscore_to_unit((rhr_base - rhr_val) / rhr_std)
 
     if sleep_hours is not None:
-        sleep_score = min(1.0, (sleep_hours * 60) / SLEEP_TARGET_MIN)
+        # Use quality-aware score if available, otherwise fall back to duration-only
+        sleep_quality = sleep_data.get("sleep_quality_pct")
+        if sleep_quality is not None:
+            sleep_score = sleep_quality / 100.0
+        else:
+            sleep_score = min(1.0, (sleep_hours * 60) / SLEEP_TARGET_MIN)
 
     # Weighted combine, re-normalizing if a component is missing.
     parts: list[tuple[float, float]] = []
@@ -945,6 +1005,9 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
                 "quality": sleep_data.get("quality_label", "ไม่มีข้อมูล"),
                 "bedtime": sleep_data.get("bedtime"),
                 "wakeup": sleep_data.get("wakeup"),
+                "deep_min": sleep_data.get("deep_min"),
+                "rem_min": sleep_data.get("rem_min"),
+                "awake_min": sleep_data.get("awake_min"),
             },
             "prev_steps": {
                 "value": round(prev_steps) if prev_steps else None,
