@@ -8,6 +8,10 @@ __pycache__/
 .env.local
 .env.*.local
 
+# machine-specific start scripts (ports/host differ per host — copy from .example)
+start_backend.bat
+start_frontend.bat
+
 # data (never commit health data)
 backend/data/raw/*
 backend/data/parquet/*
