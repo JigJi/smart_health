@@ -393,86 +393,87 @@ def _signal_status(value: float | None, baseline: float | None, metric: str) -> 
 
 
 def compute_readiness(
-    hrv: float | None, hrv_base: float | None,
-    rhr: float | None, rhr_base: float | None,
-    prev_steps: float | None,
-    streak: int,
-    sleep_hours: float | None,
-    dow: int,  # 0=Mon
+    recovery_score: int | None,
+    sleep_score: int | None,
+    strain_score: int,
+    *,
+    bedtime: str | None = None,
+    today_kcal: float = 0,
+    has_workouts: bool = False,
+    streak: int = 0,
+    prev_steps: float | None = None,
 ) -> tuple[int, str, str, str]:
-    """Return (score 0-100, label, color, reason)."""
-    score = 50
-    reasons = []
+    """Return (score 0-100, label, color, reason).
 
-    # HRV signal — cap bonus to avoid over-optimism from spikes
-    if hrv is not None and hrv_base is not None:
-        diff_pct = (hrv - hrv_base) / hrv_base
-        if diff_pct > 0.15:
-            score += 8
-        elif diff_pct > 0.05:
-            score += 5
-        elif diff_pct < -0.25:
-            score -= 20
-            reasons.append(f"HRV ต่ำมาก ({hrv:.0f} vs ปกติ {hrv_base:.0f})")
-        elif diff_pct < -0.1:
-            score -= 10
-            reasons.append(f"HRV ต่ำกว่าปกติ ({hrv:.0f} ms)")
+    Readiness is a weighted composite of the 3 dashboard metrics:
+      Recovery × 0.45 + Sleep × 0.35 + (100 - Strain) × 0.20
 
-    # RHR signal — smooth gradient to avoid cliff at exactly diff=-3
-    # (0.5 bpm difference used to swing score by 10 points)
-    if rhr is not None and rhr_base is not None:
-        diff = rhr - rhr_base
-        if diff <= -4:
-            score += 10
-        elif diff <= -2:
-            score += 6
-        elif diff <= -1:
-            score += 3
-        elif diff > 6:
-            score -= 15
-            reasons.append(f"RHR สูงมาก ({rhr:.0f} vs ปกติ {rhr_base:.0f})")
-        elif diff > 3:
-            score -= 8
-            reasons.append(f"RHR สูงกว่าปกติ ({rhr:.0f} bpm)")
+    Post-adjustments (late bedtime, workout depletion, gym streak, heavy
+    walking yesterday) apply as percentage reductions so readiness can
+    actually reach 90+ when all 3 metrics are good.
+    """
+    reasons: list[str] = []
 
-    # Previous day steps
-    if prev_steps is not None:
-        if prev_steps < 5000:
-            score += 10
-            # ไม่ต้องบอก — เป็นสิ่งดี ไม่ต้องอธิบาย
-        elif prev_steps > 15000:
-            score -= 15
-            reasons.append(f"เมื่อวานเดินเยอะ ({prev_steps:,.0f} ก้าว)")
-        elif prev_steps > 12000:
-            score -= 8
-            reasons.append(f"เมื่อวานเดินค่อนข้างเยอะ ({prev_steps:,.0f} ก้าว)")
+    # Use available components, re-normalize weights if any missing
+    W_RECOVERY, W_SLEEP, W_REST = 0.45, 0.35, 0.20
+    parts: list[tuple[float, float]] = []
+    if recovery_score is not None:
+        parts.append((recovery_score, W_RECOVERY))
+    if sleep_score is not None:
+        parts.append((sleep_score, W_SLEEP))
+    # Invert strain: low strain → high rest readiness
+    rest_from_strain = max(0, 100 - strain_score)
+    parts.append((rest_from_strain, W_REST))
 
-    # Streak fatigue
+    # Need at least recovery or sleep to produce a meaningful score;
+    # strain alone (rest_from_strain) is not enough signal.
+    if recovery_score is None and sleep_score is None:
+        return 50, "ไม่มีข้อมูล", "yellow", "ยังไม่มีข้อมูลเพียงพอ"
+
+    total_w = sum(w for _, w in parts)
+    score = sum(s * w for s, w in parts) / total_w
+
+    # --- Post-adjustments (percentage reductions) ---
+
+    # Late bedtime
+    if bedtime:
+        hour = int(bedtime.split(":")[0])
+        minute = int(bedtime.split(":")[1])
+        if 1 <= hour <= 5:
+            score *= 0.88  # ~12% reduction
+            reasons.append(f"นอนดึก ({bedtime} น.)")
+        elif hour == 0 and minute >= 30:
+            score *= 0.94  # ~6% reduction
+
+    # Already worked out today — proportional depletion
+    if has_workouts:
+        decay_pct = min(0.25, 0.05 + today_kcal / 1000 * 0.20)
+        score *= (1 - decay_pct)
+        if today_kcal >= 500:
+            reasons.append(f"ออกกำลังหนักแล้ววันนี้ ({today_kcal:.0f} kcal)")
+        elif today_kcal >= 200:
+            reasons.append(f"ออกกำลังไปแล้ววันนี้ ({today_kcal:.0f} kcal)")
+        else:
+            reasons.append("ออกกำลังเบาๆ ไปแล้ววันนี้")
+
+    # Gym streak
     if streak >= 4:
-        score -= 15
+        score *= 0.85
         reasons.append(f"ยิมติดกัน {streak} วัน ควรพัก!")
     elif streak >= 3:
-        score -= 8
+        score *= 0.92
         reasons.append(f"ยิมติดกัน {streak} วัน")
 
-    # Sleep
-    if sleep_hours is not None:
-        if sleep_hours < 5:
-            score -= 15
-            reasons.append(f"นอนน้อยมาก ({sleep_hours:.1f} ชม.)")
-        elif sleep_hours < 6:
-            score -= 8
-            reasons.append(f"นอนน้อย ({sleep_hours:.1f} ชม.)")
-        elif sleep_hours >= 8:
-            score += 5
+    # Heavy walking yesterday
+    if prev_steps is not None:
+        if prev_steps > 15000:
+            score *= 0.90
+            reasons.append(f"เมื่อวานเดินเยอะ ({prev_steps:,.0f} ก้าว)")
+        elif prev_steps > 12000:
+            score *= 0.95
+            reasons.append(f"เมื่อวานเดินค่อนข้างเยอะ ({prev_steps:,.0f} ก้าว)")
 
-    # Friday penalty
-    if dow == 4:
-        score -= 5
-
-    # Late bedtime penalty (after midnight = bad quality sleep)
-    # This is passed separately
-    score = max(0, min(100, score))
+    score = max(0, min(100, round(score)))
 
     # Label + color
     if score >= 70:
@@ -831,66 +832,7 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
 
     sleep_hours = sleep_data.get("hours")
 
-    # Compute readiness
-    score, label, color, reason = compute_readiness(
-        hrv_val, hrv_base, rhr_val, rhr_base,
-        prev_steps, streak, sleep_hours, dow,
-    )
-
-    # Post-compute adjustments — apply for ALL days (today & past) so that
-    # a day's readiness is an immutable fact of that day, not affected by
-    # when it's being viewed. Late bedtime + "already worked out" are real
-    # factors that were true on that day and should persist in history.
-    extra_reasons = []
-
-    # Late bedtime penalty
-    bedtime = sleep_data.get("bedtime")
-    if bedtime:
-        hour = int(bedtime.split(":")[0])
-        if hour >= 1 and hour <= 5:
-            score -= 10
-            extra_reasons.append(f"นอนดึก ({bedtime} น.)")
-        elif hour == 0 and int(bedtime.split(":")[1]) >= 30:
-            score -= 5
-
-    # Already worked out that day — reduce readiness proportional to intensity.
-    # Flat -10 was unfair: a 100-kcal walk shouldn't cost the same as a
-    # 700-kcal weights+cardio session. Smooth linear gradient (per memory
-    # feedback_no_threshold_cliffs): 0 kcal → -5, 500 kcal → -15, 1000+ kcal → -25.
-    if strain_data.get("workouts"):
-        today_kcal = strain_data.get("active_kcal", 0) or 0
-        penalty = min(25, 5 + today_kcal * 0.02)
-        score -= round(penalty)
-        if today_kcal >= 500:
-            extra_reasons.append(f"ออกกำลังหนักแล้ววันนี้ ({today_kcal:.0f} kcal)")
-        elif today_kcal >= 200:
-            extra_reasons.append(f"ออกกำลังไปแล้ววันนี้ ({today_kcal:.0f} kcal)")
-        else:
-            extra_reasons.append("ออกกำลังเบาๆ ไปแล้ววันนี้")
-
-    if extra_reasons:
-        reason = reason + " · " + " · ".join(extra_reasons) if reason != "ร่างกายปกติดี" else " · ".join(extra_reasons)
-
-    score = max(0, min(100, score))
-
-    # Recalculate label/color after adjustments
-    if score >= 70:
-        label = "พร้อมเต็มที่"
-        color = "green"
-    elif score >= 50:
-        label = "พร้อม"
-        color = "green"
-    elif score >= 35:
-        label = "ระวังหน่อย"
-        color = "yellow"
-    else:
-        label = "ควรพัก"
-        color = "red"
-
-    # Recovery — Altini-style z-score mapping, aligned with recovery.py:
-    #   Map z-score to 0..1 (cap at ±2σ) → weighted by HRV 0.55 / RHR 0.25 / Sleep 0.20.
-    # Previously used a naive linear %-diff which diverged from compute_recovery_series
-    # (debug_recovery.py output). Unified on the Altini path as single source of truth.
+    # --- Step 1: Compute Recovery score (Altini-style z-score) ---
     from .recovery import _zscore_to_unit, W_HRV, W_RHR, W_SLEEP, SLEEP_TARGET_MIN
 
     hrv_score: float | None = None
@@ -913,15 +855,15 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
             sleep_score = min(1.0, (sleep_hours * 60) / SLEEP_TARGET_MIN)
 
     # Weighted combine, re-normalizing if a component is missing.
-    parts: list[tuple[float, float]] = []
-    if hrv_score is not None:   parts.append((hrv_score, W_HRV))
-    if rhr_score is not None:   parts.append((rhr_score, W_RHR))
-    if sleep_score is not None: parts.append((sleep_score, W_SLEEP))
+    rec_parts: list[tuple[float, float]] = []
+    if hrv_score is not None:   rec_parts.append((hrv_score, W_HRV))
+    if rhr_score is not None:   rec_parts.append((rhr_score, W_RHR))
+    if sleep_score is not None: rec_parts.append((sleep_score, W_SLEEP))
 
     recovery_score: int | None = None
-    if parts:
-        total_w = sum(w for _, w in parts)
-        recovery_score = round(100 * sum(s * w for s, w in parts) / total_w)
+    if rec_parts:
+        total_w = sum(w for _, w in rec_parts)
+        recovery_score = round(100 * sum(s * w for s, w in rec_parts) / total_w)
 
     # Keep UI-facing component scores as 0-100 (same scale as recovery_score)
     hrv_pct = round(hrv_score * 100) if hrv_score is not None else None
@@ -937,6 +879,18 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
         today_kcal = strain_data.get("active_kcal", 0) or 0
         decay_pct = min(0.30, today_kcal / 1000 * 0.30)
         recovery_score = round(recovery_score * (1 - decay_pct))
+
+    # --- Step 2: Compute Readiness as weighted composite of the 3 dashboard metrics ---
+    score, label, color, reason = compute_readiness(
+        recovery_score=recovery_score,
+        sleep_score=sleep_pct,
+        strain_score=strain_data.get("score", 0),
+        bedtime=sleep_data.get("bedtime"),
+        today_kcal=strain_data.get("active_kcal", 0) or 0,
+        has_workouts=len(strain_data.get("workouts", [])) > 0,
+        streak=streak,
+        prev_steps=prev_steps,
+    )
 
     # Tip
     already_worked_out = len(strain_data.get("workouts", [])) > 0
@@ -1088,6 +1042,7 @@ def get_today(parquet_dir: str | Path, target_date: str | None = None) -> dict[s
 def get_calendar_month(parquet_dir: str | Path, year: int, month: int) -> dict[str, Any]:
     """Return daily readiness scores for a specific month."""
     import calendar as cal_mod
+    from .recovery import _zscore_to_unit, W_HRV, W_RHR, W_SLEEP, SLEEP_TARGET_MIN
     parquet_dir = Path(parquet_dir)
     today = date.today()
     con = duckdb.connect(":memory:")
@@ -1195,26 +1150,40 @@ def get_calendar_month(parquet_dir: str | Path, year: int, month: int) -> dict[s
             else:
                 break
 
+        # Compute recovery (z-score based) for this day
+        from statistics import pstdev
+        cal_recovery: int | None = None
+        cal_rec_parts: list[tuple[float, float]] = []
+        if hrv_val is not None and hrv_base is not None and len(prior_hrv) >= 7:
+            h_std = pstdev(prior_hrv) or 1.0
+            cal_rec_parts.append((_zscore_to_unit((hrv_val - hrv_base) / h_std), W_HRV))
+        if rhr_val is not None and rhr_base is not None and len(prior_rhr) >= 7:
+            r_std = pstdev(prior_rhr) or 1.0
+            cal_rec_parts.append((_zscore_to_unit((rhr_base - rhr_val) / r_std), W_RHR))
+        if sleep_hours is not None:
+            cal_rec_parts.append((min(1.0, (sleep_hours * 60) / SLEEP_TARGET_MIN), W_SLEEP))
+        if cal_rec_parts:
+            tw = sum(w for _, w in cal_rec_parts)
+            cal_recovery = round(100 * sum(s * w for s, w in cal_rec_parts) / tw)
+
+        cal_sleep_pct = round(min(1.0, (sleep_hours * 60) / SLEEP_TARGET_MIN) * 100) if sleep_hours else None
+
+        # Bedtime string for compute_readiness
+        bt = bedtime_by_day.get(d)
+        bt_str = f"{bt.hour:02d}:{bt.minute:02d}" if bt else None
+
         score, label, color, reason = compute_readiness(
-            hrv_val, hrv_base, rhr_val, rhr_base,
-            prev_steps, streak, sleep_hours, d.weekday(),
+            recovery_score=cal_recovery,
+            sleep_score=cal_sleep_pct,
+            strain_score=10 if d in workout_days else 0,  # simplified: workout day = some strain
+            bedtime=bt_str,
+            today_kcal=0,  # not available in calendar bulk query
+            has_workouts=d in workout_days,
+            streak=streak,
+            prev_steps=prev_steps,
         )
 
-        # Apply /today's post-compute penalties for every day so calendar
-        # matches dashboard readiness — day's readiness is immutable history
-        bt = bedtime_by_day.get(d)
-        if bt:
-            h, m = bt.hour, bt.minute
-            if 1 <= h <= 5:
-                score -= 10
-            elif h == 0 and m >= 30:
-                score -= 5
-
-        if d in workout_days:
-            score -= 10
-
-        # Clamp + recompute color (match /today thresholds)
-        score = max(0, min(100, score))
+        # Recompute color (match /today thresholds)
         if score >= 50:
             color = "green"
         elif score >= 35:
