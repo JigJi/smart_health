@@ -161,9 +161,10 @@ class HealthKitManager: ObservableObject {
 
         // Counter-based progress: phasesCompleted/totalPhases, clamped to 1.0
         // (old accumulator pattern could overflow if guard ever leaked → 539% bug)
-        // 10 phases: 9 fetches (HR/HRV/RHR/Steps/Cal/SpO2/RR/Sleep/Workouts) + 1 post
+        // 9 phases: 9 fetches (HR/HRV/RHR/Steps/Cal/SpO2/RR/Sleep/Workouts)
+        // POST completion sets syncProgress = 1.0 directly.
         var phasesCompleted = 0
-        let totalPhases = 10
+        let totalPhases = 9
         let bumpProgress: () -> Void = {
             DispatchQueue.main.async {
                 phasesCompleted += 1
